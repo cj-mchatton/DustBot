@@ -127,7 +127,7 @@ namespace DustBot
             Item(DefaultPath, "Mint Green", CosmeticCategory.PathColor, CosmeticRarity.Common, 0, "#2B8B74"),
             Item("path_blue", "Classic Blue", CosmeticCategory.PathColor, CosmeticRarity.Common, 350, "#5599D7"),
             Item("path_sunset", "Sunset Orange", CosmeticCategory.PathColor, CosmeticRarity.Uncommon, 900, "#F58B4C", level: 75),
-            Item("path_coral", "Coral Route", CosmeticCategory.PathColor, CosmeticRarity.Uncommon, 750, "#E96F68"),
+            Item("path_coral", "Rosewood Trail", CosmeticCategory.PathColor, CosmeticRarity.Uncommon, 750, "#9B5A72"),
             Item("path_neon", "Neon Purple", CosmeticCategory.PathColor, CosmeticRarity.Rare, 3500, "#A85CFF", daily: 5),
             Item("path_gold", "Gold Trail", CosmeticCategory.PathColor, CosmeticRarity.Epic, 7000, "#F4BE38", stars: 350),
             Item("path_bubble", "Bubble Trail", CosmeticCategory.PathColor, CosmeticRarity.Rare, 2500, "#6DD6E7", bunnies: 35),

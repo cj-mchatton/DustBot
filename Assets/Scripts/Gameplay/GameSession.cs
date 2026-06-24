@@ -6,6 +6,7 @@ namespace DustBot
     public enum GameSessionState
     {
         Editing,
+        CatTurn,
         Simulating,
         Won,
         Failed
@@ -19,6 +20,11 @@ namespace DustBot
         public Direction direction;
         public bool cleanedCrumb;
         public bool collectedBonus;
+        public GridPosition catFrom;
+        public GridPosition catFirst;
+        public GridPosition catTo;
+        public int catMoveCount;
+        public bool catCollision;
         public bool won;
         public FailureReason failure;
     }
@@ -28,11 +34,14 @@ namespace DustBot
         private struct SimulationVisit : IEquatable<SimulationVisit>
         {
             public GridPosition position;
+            public GridPosition catPosition;
             public int crumbsRemaining;
 
             public bool Equals(SimulationVisit other)
             {
-                return position == other.position && crumbsRemaining == other.crumbsRemaining;
+                return position == other.position &&
+                       catPosition == other.catPosition &&
+                       crumbsRemaining == other.crumbsRemaining;
             }
 
             public override bool Equals(object obj)
@@ -44,7 +53,8 @@ namespace DustBot
             {
                 unchecked
                 {
-                    return (position.GetHashCode() * 397) ^ crumbsRemaining;
+                    return ((position.GetHashCode() * 397) ^ catPosition.GetHashCode()) * 397 ^
+                           crumbsRemaining;
                 }
             }
         }
@@ -54,12 +64,14 @@ namespace DustBot
         private readonly HashSet<GridPosition> remainingCrumbs = new HashSet<GridPosition>();
         private readonly HashSet<SimulationVisit> visits = new HashSet<SimulationVisit>();
         private int simulationPathIndex;
+        private int catTurn;
         private bool isDrawing;
 
         public LevelDefinition Level { get; private set; }
         public GridManager Grid { get; private set; }
         public GameSessionState State { get; private set; }
         public GridPosition BotPosition { get; private set; }
+        public GridPosition CatPosition { get; private set; }
         public FailureReason FailureReason { get; private set; }
         public int Moves { get; private set; }
         public bool UsedHint { get; private set; }
@@ -99,6 +111,17 @@ namespace DustBot
         {
             get
             {
+                if (HasCat)
+                {
+                    bool catBonusPossible =
+                        !Level.objectives.bonusRequiredForThreeStars ||
+                        CollectedBonus ||
+                        State == GameSessionState.CatTurn;
+                    return Moves <= Level.threeStarMoveTarget &&
+                           (!Level.objectives.noHintStar || !UsedHint) &&
+                           catBonusPossible;
+                }
+
                 bool routeFinished = currentPathCells.Count > 1 &&
                                      currentPathCells[currentPathCells.Count - 1] == Grid.Dock;
                 bool bonusPossible =
@@ -110,6 +133,11 @@ namespace DustBot
                        (!Level.objectives.noUndoStar || !UsedUndo) &&
                        bonusPossible;
             }
+        }
+
+        public bool HasCat
+        {
+            get { return Level.cat != null && Level.cat.IsEnabled; }
         }
 
         public GameSession(LevelDefinition level)
@@ -139,6 +167,18 @@ namespace DustBot
         public int PathIndexOf(GridPosition position)
         {
             return currentPathCells.IndexOf(position);
+        }
+
+        public CatRoutePreview GetCatRoutePreview()
+        {
+            return CatObstacleSimulator.SimulateRoute(Level, currentPathCells);
+        }
+
+        public bool TryGetCatCollisionStep(out int step)
+        {
+            CatRoutePreview preview = GetCatRoutePreview();
+            step = preview.collisionStep;
+            return preview.collided;
         }
 
         public PathEditResult BeginPath(GridPosition position)
@@ -219,6 +259,11 @@ namespace DustBot
 
         public bool TryGetHintTarget(out GridPosition target)
         {
+            if (HasCat)
+            {
+                return TryGetCatHintTarget(out target);
+            }
+
             List<GridPosition> expectedPath = BuildExpectedPath();
             int matchingCount = MatchingPrefixLength(expectedPath);
             if (matchingCount >= expectedPath.Count)
@@ -233,6 +278,17 @@ namespace DustBot
 
         public bool ApplyNextHint(out GridPosition target)
         {
+            if (HasCat)
+            {
+                if (!TryGetCatHintTarget(out target))
+                {
+                    return false;
+                }
+
+                UsedHint = true;
+                return true;
+            }
+
             List<GridPosition> expectedPath = BuildExpectedPath();
             int matchingCount = MatchingPrefixLength(expectedPath);
             if (State != GameSessionState.Editing || matchingCount >= expectedPath.Count)
@@ -348,8 +404,193 @@ namespace DustBot
             visits.Add(new SimulationVisit
             {
                 position = BotPosition,
+                catPosition = CatPosition,
                 crumbsRemaining = remainingCrumbs.Count
             });
+            return true;
+        }
+
+        public bool TryCatTurn(Direction direction, out StepOutcome outcome)
+        {
+            outcome = new StepOutcome
+            {
+                from = BotPosition,
+                to = BotPosition,
+                direction = direction,
+                catFrom = CatPosition,
+                catFirst = CatPosition,
+                catTo = CatPosition,
+                failure = FailureReason.None
+            };
+
+            if (!HasCat ||
+                State != GameSessionState.CatTurn ||
+                direction == Direction.None)
+            {
+                return false;
+            }
+
+            GridPosition next =
+                BotPosition + DirectionUtility.ToOffset(direction);
+            if (!Grid.IsInside(next))
+            {
+                return false;
+            }
+
+            CellContent content = Grid.GetContent(next);
+            if (content == CellContent.Wall || content == CellContent.Toy)
+            {
+                return false;
+            }
+
+            Moves++;
+            BotPosition = next;
+            outcome.to = next;
+            outcome.moved = true;
+
+            if (next == CatPosition)
+            {
+                outcome.catCollision = true;
+                outcome = Fail(outcome, FailureReason.CatPounce);
+                return true;
+            }
+
+            if (content == CellContent.Sock)
+            {
+                outcome = Fail(outcome, FailureReason.SockJam);
+                return true;
+            }
+
+            if (content == CellContent.Cord)
+            {
+                outcome = Fail(outcome, FailureReason.CordZap);
+                return true;
+            }
+
+            if (content == CellContent.WetSpot)
+            {
+                outcome = Fail(outcome, FailureReason.WetSpotSlip);
+                return true;
+            }
+
+            if (remainingCrumbs.Remove(next))
+            {
+                outcome.cleanedCrumb = true;
+            }
+
+            if (Level.objectives.collectBonus &&
+                !CollectedBonus &&
+                next == Level.bonusPosition)
+            {
+                CollectedBonus = true;
+                outcome.collectedBonus = true;
+            }
+
+            catTurn++;
+            CatStepResult catStep = CatObstacleSimulator.Advance(
+                Level,
+                CatPosition,
+                BotPosition,
+                catTurn);
+            CatPosition = catStep.to;
+            outcome.catFrom = catStep.from;
+            outcome.catFirst = catStep.first;
+            outcome.catTo = catStep.to;
+            outcome.catMoveCount = catStep.moveCount;
+            outcome.catCollision = catStep.collided;
+            if (catStep.collided)
+            {
+                outcome = Fail(outcome, FailureReason.CatPounce);
+                return true;
+            }
+
+            if (content == CellContent.Dock)
+            {
+                if (remainingCrumbs.Count == 0)
+                {
+                    State = GameSessionState.Won;
+                    outcome.won = true;
+                    return true;
+                }
+
+                outcome = Fail(outcome, FailureReason.ReturnedTooEarly);
+                return true;
+            }
+
+            if (Level.hardPathLimit &&
+                Level.moveLimit > 0 &&
+                Moves >= Level.moveLimit)
+            {
+                outcome = Fail(outcome, FailureReason.OutOfMoves);
+                return true;
+            }
+
+            if (!HasSafeCatMove())
+            {
+                outcome = Fail(outcome, FailureReason.GotStuck);
+            }
+
+            return true;
+        }
+
+        public bool TryPreviewCatTurn(
+            Direction direction,
+            out GridPosition destination,
+            out CatStepResult catStep,
+            out FailureReason danger)
+        {
+            destination = BotPosition + DirectionUtility.ToOffset(direction);
+            catStep = new CatStepResult
+            {
+                from = CatPosition,
+                first = CatPosition,
+                to = CatPosition
+            };
+            danger = FailureReason.None;
+            if (!HasCat ||
+                direction == Direction.None ||
+                !Grid.IsInside(destination))
+            {
+                return false;
+            }
+
+            CellContent content = Grid.GetContent(destination);
+            if (content == CellContent.Wall || content == CellContent.Toy)
+            {
+                return false;
+            }
+
+            if (destination == CatPosition)
+            {
+                danger = FailureReason.CatPounce;
+                return true;
+            }
+
+            if (content == CellContent.Sock) danger = FailureReason.SockJam;
+            if (content == CellContent.Cord) danger = FailureReason.CordZap;
+            if (content == CellContent.WetSpot) danger = FailureReason.WetSpotSlip;
+            if (content == CellContent.Dock && remainingCrumbs.Count > 0)
+                danger = FailureReason.ReturnedTooEarly;
+            if (Level.hardPathLimit &&
+                Level.moveLimit > 0 &&
+                Moves + 1 >= Level.moveLimit &&
+                !(content == CellContent.Dock && remainingCrumbs.Count == 0))
+                danger = FailureReason.OutOfMoves;
+            if (danger != FailureReason.None)
+            {
+                return true;
+            }
+
+            catStep = CatObstacleSimulator.Advance(
+                Level,
+                CatPosition,
+                destination,
+                catTurn + 1);
+            if (catStep.collided)
+            {
+                danger = FailureReason.CatPounce;
+            }
+
             return true;
         }
 
@@ -359,6 +600,9 @@ namespace DustBot
             {
                 from = BotPosition,
                 to = BotPosition,
+                catFrom = CatPosition,
+                catFirst = CatPosition,
+                catTo = CatPosition,
                 failure = FailureReason.None
             };
 
@@ -424,6 +668,26 @@ namespace DustBot
                 outcome.collectedBonus = true;
             }
 
+            if (HasCat)
+            {
+                catTurn++;
+                CatStepResult catStep = CatObstacleSimulator.Advance(
+                    Level,
+                    CatPosition,
+                    BotPosition,
+                    catTurn);
+                CatPosition = catStep.to;
+                outcome.catFrom = catStep.from;
+                outcome.catFirst = catStep.first;
+                outcome.catTo = catStep.to;
+                outcome.catMoveCount = catStep.moveCount;
+                outcome.catCollision = catStep.collided;
+                if (catStep.collided)
+                {
+                    return Fail(outcome, FailureReason.CatPounce);
+                }
+            }
+
             if (content == CellContent.Dock)
             {
                 if (remainingCrumbs.Count == 0)
@@ -444,6 +708,7 @@ namespace DustBot
             SimulationVisit visit = new SimulationVisit
             {
                 position = BotPosition,
+                catPosition = CatPosition,
                 crumbsRemaining = remainingCrumbs.Count
             };
             if (!visits.Add(visit))
@@ -457,7 +722,13 @@ namespace DustBot
         public void ResetSimulation()
         {
             ResetRuntimeState();
-            State = GameSessionState.Editing;
+            State = HasCat
+                ? GameSessionState.CatTurn
+                : GameSessionState.Editing;
+            if (HasCat)
+            {
+                SimulationAttempts++;
+            }
             isDrawing = false;
         }
 
@@ -506,9 +777,90 @@ namespace DustBot
             return Math.Max(1, matching);
         }
 
+        private bool TryGetCatHintTarget(out GridPosition target)
+        {
+            target = BotPosition;
+            int bestScore = int.MinValue;
+            Direction[] directions =
+            {
+                Direction.Up,
+                Direction.Right,
+                Direction.Down,
+                Direction.Left
+            };
+            for (int i = 0; i < directions.Length; i++)
+            {
+                GridPosition destination;
+                CatStepResult catStep;
+                FailureReason danger;
+                if (!TryPreviewCatTurn(
+                        directions[i],
+                        out destination,
+                        out catStep,
+                        out danger) ||
+                    danger != FailureReason.None)
+                {
+                    continue;
+                }
+
+                int score =
+                    Manhattan(destination, catStep.to) * 4 +
+                    (remainingCrumbs.Contains(destination) ? 30 : 0) +
+                    (Level.objectives.collectBonus &&
+                     !CollectedBonus &&
+                     destination == Level.bonusPosition ? 18 : 0) +
+                    (remainingCrumbs.Count == 0 &&
+                     destination == Grid.Dock ? 50 : 0);
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    target = destination;
+                }
+            }
+
+            return bestScore > int.MinValue;
+        }
+
+        private bool HasSafeCatMove()
+        {
+            Direction[] directions =
+            {
+                Direction.Up,
+                Direction.Right,
+                Direction.Down,
+                Direction.Left
+            };
+            for (int i = 0; i < directions.Length; i++)
+            {
+                GridPosition destination;
+                CatStepResult catStep;
+                FailureReason danger;
+                if (TryPreviewCatTurn(
+                        directions[i],
+                        out destination,
+                        out catStep,
+                        out danger) &&
+                    danger == FailureReason.None)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static int Manhattan(GridPosition a, GridPosition b)
+        {
+            return Math.Abs(a.x - b.x) + Math.Abs(a.y - b.y);
+        }
+
         private void ResetRuntimeState()
         {
             BotPosition = Grid.Start;
+            CatPosition = HasCat
+                ? Level.cat.startPosition
+                : new GridPosition(-1, -1);
+            catTurn = 0;
             FailureReason = FailureReason.None;
             Moves = 0;
             CollectedBonus = false;

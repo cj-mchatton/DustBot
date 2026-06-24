@@ -15,6 +15,7 @@ namespace DustBot
         public int orderComplexity;
         public int temptingBranches;
         public int bonusDetourCost;
+        public int catPressure;
         public bool tooTrivial;
         public bool tooDense;
     }
@@ -41,6 +42,14 @@ namespace DustBot
             int crumbSpread = CalculateCrumbSpread(level);
             int orderComplexity = CalculateOrderComplexity(level, route);
             int bonusDetourCost = CalculateBonusDetourCost(level, route);
+            int catPressure = 0;
+            if (level.cat != null && level.cat.IsEnabled)
+            {
+                CatRoutePreview catPreview = CatObstacleSimulator.SimulateRoute(level, route);
+                catPressure = catPreview.closestDistance < 0
+                    ? 0
+                    : Math.Max(0, 5 - catPreview.closestDistance);
+            }
             int nearbyBlockers = 0;
             int nearbyHazards = 0;
             int blockingCells = 0;
@@ -77,6 +86,7 @@ namespace DustBot
                 Math.Min(7, orderComplexity) +
                 Math.Min(6, temptingBranches * 2) +
                 Math.Min(6, bonusDetourCost * 2) +
+                Math.Min(8, catPressure * 2) +
                 (level.hardPathLimit ? 4 : 0) +
                 (level.objectives.collectBonus ? 2 : 0);
 
@@ -95,6 +105,7 @@ namespace DustBot
                   nearbyBlockers + nearbyHazards < 2 ||
                   (temptingBranches == 0 &&
                    nearbyHazards == 0 &&
+                   catPressure == 0 &&
                    !level.hardPathLimit)));
             bool tooDense = blockingCells > level.width * level.height / 2;
 
@@ -110,6 +121,7 @@ namespace DustBot
                 orderComplexity = orderComplexity,
                 temptingBranches = temptingBranches,
                 bonusDetourCost = bonusDetourCost,
+                catPressure = catPressure,
                 tooTrivial = tooTrivial,
                 tooDense = tooDense
             };
@@ -124,11 +136,13 @@ namespace DustBot
             int effectiveDecisions =
                 report.routeDecisions +
                 Math.Min(3, report.nearbyBlockers + report.nearbyHazards) +
+                Math.Min(2, report.catPressure) +
                 (level.hardPathLimit ? 1 : 0) +
                 Math.Min(2, report.orderComplexity / 3);
             int effectiveTemptations =
                 report.temptingBranches +
                 Math.Min(2, report.nearbyHazards) +
+                (report.catPressure > 0 ? 1 : 0) +
                 (level.hardPathLimit ? 1 : 0);
             if (report.tooDense ||
                 report.turns < settings.minimumTurns ||

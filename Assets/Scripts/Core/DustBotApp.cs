@@ -179,7 +179,7 @@ namespace DustBot
             UI.ShowLevelSelect(0);
             yield return CaptureAfterLayout(Path.Combine(path, "02-level-select.png"));
 
-            UI.ShowGame(Levels.LoadMain(42));
+            UI.ShowGame(Levels.LoadMain(30));
             yield return null;
             GameScreen journey = UnityEngine.Object.FindAnyObjectByType<GameScreen>();
             if (journey != null)

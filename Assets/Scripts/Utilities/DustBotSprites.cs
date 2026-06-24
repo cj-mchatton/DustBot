@@ -16,6 +16,7 @@ namespace DustBot
         public static Sprite Crumbs { get { return Load("crumbs"); } }
         public static Sprite Dock { get { return Load("dock"); } }
         public static Sprite DustBunny { get { return Load("dust-bunny"); } }
+        public static Sprite Cat { get { return Load("cat"); } }
 
         public static Sprite ForCell(CellContent content)
         {

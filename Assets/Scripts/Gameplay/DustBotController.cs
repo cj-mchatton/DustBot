@@ -15,7 +15,7 @@ namespace DustBot
             Action<StepOutcome> onStep,
             Action onFinished)
         {
-            int stepIndex = 0;
+            const float cruiseSecondsPerTile = 0.15f;
             while (session.State == GameSessionState.Simulating)
             {
                 while (Paused)
@@ -27,25 +27,15 @@ namespace DustBot
                 if (outcome.moved)
                 {
                     audio.PlayMove();
-                    float duration = Mathf.Lerp(0.145f, 0.095f, Mathf.Clamp01(stepIndex / 10f));
-                    yield return board.AnimateBotTo(
-                        outcome.to,
-                        outcome.direction,
-                        duration,
-                        delegate { return Paused; });
-                }
-                else
-                {
-                    float waitElapsed = 0f;
-                    while (waitElapsed < 0.035f)
+                    if (outcome.catMoveCount > 0 || outcome.catCollision)
                     {
-                        if (!Paused)
-                        {
-                            waitElapsed += Time.unscaledDeltaTime;
-                        }
-
-                        yield return null;
+                        audio.PlayCatStep(outcome.catCollision);
                     }
+
+                    yield return board.AnimateCruiseStep(
+                        outcome,
+                        cruiseSecondsPerTile,
+                        delegate { return Paused; });
                 }
 
                 if (onStep != null)
@@ -58,21 +48,6 @@ namespace DustBot
                     yield return board.AnimateFailure(outcome);
                 }
 
-                if (session.State == GameSessionState.Simulating)
-                {
-                    float waitElapsed = 0f;
-                    while (waitElapsed < 0.025f)
-                    {
-                        if (!Paused)
-                        {
-                            waitElapsed += Time.unscaledDeltaTime;
-                        }
-
-                        yield return null;
-                    }
-                }
-
-                stepIndex++;
             }
 
             if (onFinished != null)

@@ -15,6 +15,8 @@ namespace DustBot
         public static readonly Color MintDark = new Color32(43, 139, 116, 255);
         public static readonly Color Yellow = new Color32(248, 198, 91, 255);
         public static readonly Color Coral = new Color32(241, 121, 111, 255);
+        public static readonly Color Error = new Color32(218, 66, 71, 255);
+        public static readonly Color Warning = new Color32(190, 132, 48, 255);
         public static readonly Color Blue = new Color32(106, 178, 226, 255);
         public static readonly Color TileA = new Color32(246, 239, 224, 255);
         public static readonly Color TileB = new Color32(237, 228, 208, 255);

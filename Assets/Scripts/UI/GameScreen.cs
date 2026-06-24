@@ -22,6 +22,7 @@ namespace DustBot
         private Coroutine simulation;
         private GameObject modal;
         private int dailyAttemptCount;
+        private bool catAttemptRegistered;
 
         public void Initialize(DustBotApp application, LevelDefinition definition)
         {
@@ -129,12 +130,35 @@ namespace DustBot
             boardRect.offsetMin = Vector2.one * 15f;
             boardRect.offsetMax = Vector2.one * -15f;
             board = boardObject.AddComponent<GameBoardView>();
-            board.Initialize(level, session, input, app.Cosmetics, OnPathEdited);
+            board.Initialize(
+                level,
+                session,
+                input,
+                app.Cosmetics,
+                OnPathEdited,
+                OnCatSwipe);
 
-            playButton = CreateBottomButton("PLAY", OnPlay, DustBotTheme.Mint, 0.035f, 0.37f, 31);
+            playButton = CreateBottomButton(
+                session.HasCat ? "SWIPE TO MOVE" : "PLAY",
+                session.HasCat ? null : (UnityEngine.Events.UnityAction)OnPlay,
+                DustBotTheme.Mint,
+                0.035f,
+                session.HasCat ? 0.585f : 0.37f,
+                session.HasCat ? 25 : 31);
             undoButton = CreateBottomButton("UNDO", OnUndo, DustBotTheme.Blue, 0.39f, 0.585f, 25);
-            resetButton = CreateBottomButton("RESET", OnReset, DustBotTheme.MutedInk, 0.605f, 0.79f, 25);
+            resetButton = CreateBottomButton(
+                session.HasCat ? "RESTART" : "RESET",
+                OnReset,
+                DustBotTheme.MutedInk,
+                session.HasCat ? 0.605f : 0.605f,
+                session.HasCat ? 0.79f : 0.79f,
+                25);
             hintButton = CreateBottomButton(HintButtonLabel(), OnHint, DustBotTheme.Coral, 0.81f, 0.965f, 25);
+            if (session.HasCat)
+            {
+                playButton.interactable = false;
+                undoButton.gameObject.SetActive(false);
+            }
         }
 
         private Button CreateBottomButton(
@@ -160,6 +184,8 @@ namespace DustBot
             if (result == PathEditResult.Invalid)
             {
                 app.Haptics.Error();
+                StartCoroutine(FlashStatus(
+                    "BLOCKED • The red × and shake mark an invalid tile."));
             }
             else if (result == PathEditResult.LimitReached)
             {
@@ -211,6 +237,72 @@ namespace DustBot
                 OnSimulationFinished));
         }
 
+        private void OnCatSwipe(Direction direction)
+        {
+            if (!session.HasCat ||
+                session.State != GameSessionState.CatTurn ||
+                simulation != null ||
+                modal != null ||
+                botController.Paused)
+            {
+                return;
+            }
+
+            StepOutcome outcome;
+            if (!session.TryCatTurn(direction, out outcome))
+            {
+                GridPosition blocked =
+                    session.BotPosition + DirectionUtility.ToOffset(direction);
+                board.PlayInvalidFeedback(
+                    session.Grid.IsInside(blocked)
+                        ? blocked
+                        : session.BotPosition);
+                app.Haptics.Error();
+                StartCoroutine(FlashStatus(
+                    "BLOCKED • Swipe toward an open neighboring tile."));
+                return;
+            }
+
+            if (level.mode == GameMode.DailyChallenge && !catAttemptRegistered)
+            {
+                dailyAttemptCount = app.RegisterDailyAttempt();
+                catAttemptRegistered = true;
+            }
+
+            simulation = StartCoroutine(PlayCatTurn(outcome));
+        }
+
+        private IEnumerator PlayCatTurn(StepOutcome outcome)
+        {
+            app.Audio.PlayMove();
+            if (outcome.catMoveCount > 0 || outcome.catCollision)
+            {
+                app.Audio.PlayCatStep(outcome.catCollision);
+            }
+
+            yield return board.AnimateCatTurn(
+                outcome,
+                delegate { return botController.Paused; });
+            OnSimulationStep(outcome);
+
+            if (session.State == GameSessionState.Failed)
+            {
+                yield return board.AnimateFailure(outcome);
+            }
+
+            simulation = null;
+            board.RefreshAll();
+            UpdateHud();
+            if (session.State == GameSessionState.Won)
+            {
+                HandleWin();
+            }
+            else if (session.State == GameSessionState.Failed)
+            {
+                HandleFailure();
+            }
+        }
+
         private void OnUndo()
         {
             if (input.Undo())
@@ -245,6 +337,7 @@ namespace DustBot
             }
 
             session.ResetSimulation();
+            catAttemptRegistered = false;
             CloseModal();
             board.RefreshAll();
             SetEditingButtons(true);
@@ -283,7 +376,6 @@ namespace DustBot
             if (outcome.cleanedCrumb)
             {
                 app.Audio.PlayCrumbClean();
-                board.RefreshCell(outcome.to);
                 board.PlayCrumbFeedback(outcome.to);
             }
 
@@ -328,6 +420,7 @@ namespace DustBot
 
         private IEnumerator ShowWinSequence(LevelResult result)
         {
+            yield return board.AnimateDockArrival();
             yield return board.AnimateWin();
             string nextText = NextLevelText();
             string details = string.Format(
@@ -377,6 +470,7 @@ namespace DustBot
             Button resume = UIFactory.CreateButton("Resume", panel.transform, "RESUME", ResumeFromPause, DustBotTheme.Mint, 32);
             UIFactory.SetAnchors(resume.GetComponent<RectTransform>(), new Vector2(0.08f, 0.45f), new Vector2(0.92f, 0.66f), Vector2.zero, Vector2.zero);
             Button restart = UIFactory.CreateButton("Restart", panel.transform, "EDIT ROUTE", RetryAttempt, DustBotTheme.Blue, 27);
+            UIFactory.GetButtonText(restart).text = session.HasCat ? "RESTART CHASE" : "EDIT ROUTE";
             UIFactory.SetAnchors(restart.GetComponent<RectTransform>(), new Vector2(0.08f, 0.2f), new Vector2(0.46f, 0.38f), Vector2.zero, Vector2.zero);
             Button home = UIFactory.CreateButton("Home", panel.transform, "HOME", app.UI.ShowMainMenu, DustBotTheme.MutedInk, 27);
             UIFactory.SetAnchors(home.GetComponent<RectTransform>(), new Vector2(0.54f, 0.2f), new Vector2(0.92f, 0.38f), Vector2.zero, Vector2.zero);
@@ -461,6 +555,16 @@ namespace DustBot
 
         private void SetEditingButtons(bool editing)
         {
+            if (session.HasCat)
+            {
+                playButton.interactable = false;
+                hintButton.interactable =
+                    session.State == GameSessionState.CatTurn;
+                resetButton.interactable = true;
+                UIFactory.GetButtonText(resetButton).text = "RESTART";
+                return;
+            }
+
             playButton.interactable = editing;
             undoButton.interactable = editing && session.CanUndo;
             hintButton.interactable = editing;
@@ -470,6 +574,33 @@ namespace DustBot
 
         private void UpdateHud()
         {
+            if (session.HasCat)
+            {
+                string bonusState = level.objectives.collectBonus
+                    ? "  •  BUNNY " +
+                      (session.CollectedBonus ? "COLLECTED" : "WAITING")
+                    : string.Empty;
+                string limit = level.hardPathLimit
+                    ? "  •  MAX " + level.moveLimit
+                    : string.Empty;
+                string perfectState = session.CanStillEarnThreeStars
+                    ? "3★ CLEAN AVAILABLE"
+                    : "REPLAY FOR 3★";
+                statusText.text = string.Format(
+                    "CRUMBS {0}{1}\nMOVES {2}  •  IDEAL {3}{4}  •  {5}",
+                    session.CrumbsRemaining,
+                    bonusState,
+                    session.Moves,
+                    level.threeStarMoveTarget,
+                    limit,
+                    perfectState);
+                statusText.color = session.CanStillEarnThreeStars
+                    ? DustBotTheme.Ink
+                    : DustBotTheme.Warning;
+                coinText.text = string.Format("{0}\nCOINS", app.Economy.Coins);
+                return;
+            }
+
             int displayedMoves = session.State == GameSessionState.Editing
                 ? Mathf.Max(0, session.CurrentPathCells.Count - 1)
                 : session.Moves;
@@ -493,20 +624,31 @@ namespace DustBot
                         ? "ROUTED"
                         : "WAITING")
                 : string.Empty;
+            int catCollisionStep = -1;
+            bool catDanger = session.State == GameSessionState.Editing &&
+                             session.TryGetCatCollisionStep(out catCollisionStep);
+            string catStatus = session.HasCat
+                ? string.Format(
+                    "  •  CAT {0}",
+                    catDanger ? "DANGER " + catCollisionStep : "SAFE")
+                : string.Empty;
             string perfect = session.CanStillEarnThreeStars
                 ? "PERFECT CLEAN AVAILABLE"
                 : "REPLAY FOR PERFECT CLEAN";
             statusText.text = string.Format(
-                "CRUMBS {0}{1}\n{2}  •  {3}",
+                "CRUMBS {0}{1}{2}\n{3}  •  {4}",
                 session.State == GameSessionState.Editing
                     ? session.PlannedCrumbsRemaining
                     : session.CrumbsRemaining,
                 bonus,
+                catStatus,
                 moveText,
                 perfect);
-            statusText.color = session.CanStillEarnThreeStars
-                ? DustBotTheme.Ink
-                : DustBotTheme.Coral;
+            statusText.color = catDanger
+                ? DustBotTheme.Error
+                : session.CanStillEarnThreeStars
+                    ? DustBotTheme.Ink
+                    : DustBotTheme.Warning;
             coinText.text = string.Format("{0}\nCOINS", app.Economy.Coins);
             if (session.State == GameSessionState.Editing)
             {
@@ -519,7 +661,7 @@ namespace DustBot
             string previous = statusText.text;
             Color previousColor = statusText.color;
             statusText.text = message;
-            statusText.color = DustBotTheme.Coral;
+            statusText.color = DustBotTheme.Error;
             yield return new WaitForSecondsRealtime(1.25f);
             statusText.color = previousColor;
             statusText.text = previous;
@@ -555,6 +697,17 @@ namespace DustBot
 
         private static string LevelTitle(LevelDefinition definition)
         {
+            if (definition.cat != null && definition.cat.IsEnabled)
+            {
+                switch (definition.mode)
+                {
+                    case GameMode.DailyChallenge: return "DAILY CAT CHASE";
+                    case GameMode.MasterClean: return "MASTER CAT CHASE " + definition.levelNumber;
+                    case GameMode.EndlessClean: return "CAT CHASE " + definition.levelNumber;
+                    default: return "CAT CHASE " + definition.levelNumber;
+                }
+            }
+
             switch (definition.mode)
             {
                 case GameMode.DailyChallenge: return "DAILY CHALLENGE";
@@ -574,13 +727,29 @@ namespace DustBot
             if (definition.mode == GameMode.DailyChallenge)
             {
                 return string.Format(
-                    "SPECIAL {0} • Plan every turn, collect the Dust Bunny, and avoid hints for a perfect daily clean.",
-                    ArchetypeLabel(definition.archetype));
+                    "SPECIAL {0}{1} • Plan every turn, collect the Dust Bunny, and avoid hints for a perfect daily clean.",
+                    ArchetypeLabel(definition.archetype),
+                    definition.cat != null && definition.cat.IsEnabled
+                        ? " • " + CatLabel(definition.cat.behavior)
+                        : string.Empty);
+            }
+
+            if (definition.cat != null && definition.cat.IsEnabled)
+            {
+                return "SWIPE ONE TILE • Cat moves twice, horizontal first. Clean every crumb, use furniture, then dock.";
             }
 
             return string.Format(
-                "{0} • Drag through every crumb, then finish at the dock.",
-                ArchetypeLabel(definition.archetype));
+                "{0}{1} • Drag through every crumb, then finish at the dock.",
+                ArchetypeLabel(definition.archetype),
+                definition.cat != null && definition.cat.IsEnabled
+                    ? " • " + CatLabel(definition.cat.behavior)
+                    : string.Empty);
+        }
+
+        private static string CatLabel(CatBehavior behavior)
+        {
+            return "CURIOUS CAT: TWO MOVES, HORIZONTAL FIRST";
         }
 
         private static string ArchetypeLabel(LevelArchetype archetype)
@@ -611,6 +780,7 @@ namespace DustBot
                 case FailureReason.ReturnedTooEarly: return "Back at the dock, but crumbs are still plotting.";
                 case FailureReason.OutOfMoves: return "Maximum path length reached. Redraw a shorter, cleaner route.";
                 case FailureReason.LoopDetected: return "DustBot found an infinite cleaning career.";
+                case FailureReason.CatPounce: return "Cat pounce! Use the paw preview and furniture to keep whiskers at a safe distance.";
                 default: return "DustBot got stuck. Redraw the next part of the route.";
             }
         }
@@ -702,6 +872,25 @@ namespace DustBot
         public void PrepareForStoreScreenshot(int routeSteps)
         {
             routeSteps = Mathf.Clamp(routeSteps, 0, level.expectedSolution.Count);
+            if (session.HasCat)
+            {
+                routeSteps = Mathf.Min(routeSteps, 1);
+                for (int i = 0;
+                     i < routeSteps &&
+                     session.State == GameSessionState.CatTurn;
+                     i++)
+                {
+                    StepOutcome outcome;
+                    session.TryCatTurn(
+                        level.expectedSolution[i].direction,
+                        out outcome);
+                }
+
+                board.RefreshAll();
+                UpdateHud();
+                return;
+            }
+
             session.BeginPath(session.Grid.Start);
             for (int i = 0; i < routeSteps; i++)
             {

@@ -18,6 +18,10 @@ folder, and open it with Unity `6000.5.0f1`.
 
 Touch DustBot and drag through orthogonally adjacent tiles to draw one continuous route. Clean every crumb and finish at the charging dock. Drag backward to erase, or use Undo, Reset, and earned-coin hints.
 
+Cat Chase rooms switch to one-tile directional swipes. DustBot moves first,
+then a predictable Curious Cat makes two horizontal-first pursuit moves.
+Furniture, corners, and corridors become tools for cleaning safely.
+
 ## Complete game modes
 
 - **Main Journey:** 6,000 deterministic rooms, including 15 hand-authored tutorial levels.
@@ -39,6 +43,9 @@ Use these Unity menu commands:
 - `DustBot > Configure Project` applies the iPhone release settings and app icon.
 - `DustBot > Run Content Validation` compiles and simulates all 6,000 journey levels plus tutorial, daily, master, hazard, determinism, reward, and save-repair checks.
 - `DustBot > Build iOS Release` validates the game and creates the Xcode project at `Build/iOS`.
+
+Implementation details and physical-device checks are documented in
+`GAMEPLAY_POLISH_CAT_AUDIO_REPORT.md` and `IOS_AUDIO.md`.
 
 Command-line validation:
 

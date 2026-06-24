@@ -1,3 +1,3 @@
 Welcome to DustBot 1.0!
 
-Draw clever cleaning routes across 6,000 rooms, tackle daily challenges, unlock Master Clean, and chase your best Endless Clean run.
+Draw clever routes across 6,000 rooms and tackle turn-based Cat Chases where every swipe triggers two predictable pursuit moves.

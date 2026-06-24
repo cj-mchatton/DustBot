@@ -7,7 +7,7 @@ namespace DustBot
     {
         public const int MainJourneyLevelCount = 6000;
         public const int TutorialLevelCount = 15;
-        public const int CurrentGenerationVersion = 4;
+        public const int CurrentGenerationVersion = 5;
 
         public LevelManifestEntry GetMainEntry(int levelNumber)
         {

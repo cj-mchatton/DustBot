@@ -21,7 +21,7 @@ namespace DustBot
                 throw new ArgumentNullException("entry");
             }
 
-            if (entry.generationVersion < 1 || entry.generationVersion > 4)
+            if (entry.generationVersion < 1 || entry.generationVersion > 5)
             {
                 throw new NotSupportedException(
                     "Unsupported DustBot generation version " + entry.generationVersion);
@@ -42,6 +42,14 @@ namespace DustBot
             {
                 List<GridPosition> path = GeneratePath(entry, settings, candidate * 128);
                 LevelDefinition level = BuildLevel(entry, mode, settings, path, candidate);
+                if (settings.catBehavior != CatBehavior.None &&
+                    mode == GameMode.MainJourney &&
+                    entry.levelNumber == 30 &&
+                    (level.cat == null || !level.cat.IsEnabled))
+                {
+                    lastRejection = "A required cat tutorial could not place a fair cat start.";
+                    continue;
+                }
 
                 string validationMessage;
                 if (!LevelValidator.TryValidate(level, out validationMessage))
@@ -295,6 +303,25 @@ namespace DustBot
                 settings.minimumTemptingBranches = 0;
                 settings.hardPathLimit = false;
             }
+            if (entry.generationVersion >= 5 &&
+                !entry.useDailyChallengeProfile &&
+                entry.levelNumber == 30)
+            {
+                settings.minimumPathLength = 9;
+                settings.maximumPathLength = Math.Min(area - 5, 14);
+                settings.crumbCount = 1;
+                settings.blockerCount = 7;
+                settings.hazardCount = 0;
+                settings.includeBonus = false;
+                settings.bonusRequiredForThreeStars = false;
+                settings.minimumTurns = 3;
+                settings.minimumDetour = 2;
+                settings.minimumEngagementScore = 18;
+                settings.hardPathLimit = false;
+                settings.minimumCrumbSpread = 1;
+                settings.minimumRouteDecisions = 1;
+                settings.minimumTemptingBranches = 0;
+            }
             settings.minimumPathLength = Math.Max(5, Math.Min(area - 3, settings.minimumPathLength));
             settings.maximumPathLength = Math.Max(
                 settings.minimumPathLength,
@@ -304,6 +331,10 @@ namespace DustBot
                 Math.Min(5, Math.Min(settings.crumbCount, Math.Max(1, settings.minimumPathLength / 3))));
             settings.blockerCount = Math.Max(0, Math.Min(area / 4, settings.blockerCount));
             settings.hazardCount = Math.Max(0, Math.Min(area / 5, settings.hazardCount));
+            if (entry.generationVersion >= 5)
+            {
+                settings.catBehavior = SelectCatBehavior(entry);
+            }
             return settings;
         }
 
@@ -460,7 +491,7 @@ namespace DustBot
                         CultureInfo.InvariantCulture,
                         "{0}_v{1}_path_{2}",
                         entry.seed,
-                        entry.generationVersion,
+                        Math.Min(entry.generationVersion, 4),
                         canonicalAttempt));
                 int targetLength = random.Range(settings.minimumPathLength, settings.maximumPathLength + 1);
                 GridPosition start = RandomEdgePosition(random, entry.boardWidth, entry.boardHeight);
@@ -559,6 +590,16 @@ namespace DustBot
                 objectiveSet = entry.objectiveSet
             };
 
+            if (settings.catBehavior != CatBehavior.None)
+            {
+                level.mechanicSet = "CatChaseTurns";
+                if (mode == GameMode.MainJourney && entry.levelNumber == 30)
+                {
+                    level.tutorialMessage =
+                        "CAT CHASE • Swipe one tile. Then the cat moves twice, horizontal first. Use furniture, clean, and dock.";
+                }
+            }
+
             level.cells.Add(new GridCellDefinition(path[0], CellContent.Start));
             level.cells.Add(new GridCellDefinition(path[path.Count - 1], CellContent.Dock));
 
@@ -607,6 +648,11 @@ namespace DustBot
                 PlaceOffPathContentV2(level, path, settings, decorationSalt);
             }
 
+            if (settings.catBehavior != CatBehavior.None)
+            {
+                TryPlaceCat(level, path, settings.catBehavior, decorationSalt);
+            }
+
             return level;
         }
 
@@ -635,7 +681,7 @@ namespace DustBot
                     CultureInfo.InvariantCulture,
                     "{0}_v{1}_decor",
                     level.seed,
-                    level.generationVersion + "_" + decorationSalt));
+                    Math.Min(level.generationVersion, 4) + "_" + decorationSalt));
             random.Shuffle(available);
             int cursor = 0;
 
@@ -688,7 +734,7 @@ namespace DustBot
                     CultureInfo.InvariantCulture,
                     "{0}_v{1}_decor",
                     level.seed,
-                    level.generationVersion + "_" + decorationSalt));
+                    Math.Min(level.generationVersion, 4) + "_" + decorationSalt));
             random.Shuffle(available);
             random.Shuffle(hazardCandidates);
             random.Shuffle(blockerCandidates);
@@ -911,6 +957,189 @@ namespace DustBot
             int manhattan = Math.Abs(start.x - dock.x) + Math.Abs(start.y - dock.y);
             int detour = path.Count - 1 - manhattan;
             return turns >= settings.minimumTurns && detour >= settings.minimumDetour;
+        }
+
+        private static CatBehavior SelectCatBehavior(LevelManifestEntry entry)
+        {
+            uint hash = DeterministicRandom.StableHash(entry.seed + "_cat");
+            bool daily = entry.useDailyChallengeProfile;
+            bool master = entry.difficultyTier == DifficultyTier.Master &&
+                          entry.seed.IndexOf("Master", StringComparison.Ordinal) >= 0;
+            bool endless = entry.seed.IndexOf("Endless", StringComparison.Ordinal) >= 0;
+
+            if (daily)
+            {
+                if (hash % 3 == 0)
+                {
+                    return CatBehavior.None;
+                }
+
+                return CatBehavior.Curious;
+            }
+
+            if (master)
+            {
+                return CatBehavior.Curious;
+            }
+
+            if (endless)
+            {
+                if (entry.levelNumber < 8 || hash % 3 == 0)
+                {
+                    return CatBehavior.None;
+                }
+
+                return CatBehavior.Curious;
+            }
+
+            int level = entry.levelNumber;
+            if (level <= 20)
+            {
+                return CatBehavior.None;
+            }
+
+            if (level == 30)
+            {
+                return CatBehavior.Curious;
+            }
+
+            if (level <= 35)
+            {
+                return hash % 4 == 0
+                    ? CatBehavior.Curious
+                    : CatBehavior.None;
+            }
+
+            if (level <= 75)
+            {
+                return hash % 2 == 0 ? CatBehavior.Curious : CatBehavior.None;
+            }
+
+            return hash % 4 == 0 ? CatBehavior.None : CatBehavior.Curious;
+        }
+
+        private static bool TryPlaceCat(
+            LevelDefinition level,
+            List<GridPosition> route,
+            CatBehavior behavior,
+            int decorationSalt)
+        {
+            HashSet<GridPosition> occupied = new HashSet<GridPosition>(route);
+            for (int i = 0; i < level.cells.Count; i++)
+            {
+                occupied.Add(level.cells[i].position);
+            }
+
+            List<GridPosition> candidates = new List<GridPosition>();
+            for (int y = 0; y < level.height; y++)
+            {
+                for (int x = 0; x < level.width; x++)
+                {
+                    GridPosition position = new GridPosition(x, y);
+                    if (!occupied.Contains(position) &&
+                        Manhattan(position, route[0]) >= 3 &&
+                        DistanceToRoute(position, route) <= 4)
+                    {
+                        candidates.Add(position);
+                    }
+                }
+            }
+
+            DeterministicRandom random = new DeterministicRandom(
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0}_v5_cat_{1}",
+                    level.seed,
+                    decorationSalt));
+            random.Shuffle(candidates);
+
+            GridPosition best = new GridPosition(-1, -1);
+            List<SolutionStep> bestSolution = null;
+            int bestScore = int.MinValue;
+            int candidateLimit = Math.Min(20, candidates.Count);
+            for (int i = 0; i < candidateLimit; i++)
+            {
+                level.cat = new CatDefinition
+                {
+                    behavior = CatBehavior.Curious,
+                    startPosition = candidates[i],
+                    horizontalFirst = true
+                };
+
+                List<SolutionStep> solution;
+                int searchLimit = Math.Min(
+                    level.width * level.height * 3,
+                    Math.Max(route.Count + 18, level.width * level.height));
+                if (!CatLevelSolver.TrySolve(level, searchLimit, out solution))
+                {
+                    continue;
+                }
+
+                List<GridPosition> solvedRoute =
+                    CatLevelSolver.BuildRoute(level, solution);
+                CatRoutePreview preview =
+                    CatObstacleSimulator.SimulateRoute(level, solvedRoute);
+                CatRelevanceReport relevance =
+                    CatObstacleSimulator.AnalyzeRelevance(level, solvedRoute);
+                if (preview.collided || !relevance.IsStrategicallyActive)
+                {
+                    continue;
+                }
+
+                int score =
+                    Math.Min(10, relevance.pressureTurns) * 8 +
+                    Math.Min(10, relevance.movementTurns) * 3 +
+                    Math.Min(12, relevance.uniqueVisitedTiles) * 2 +
+                    Math.Min(12, relevance.reachableTiles) -
+                    solution.Count;
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    best = candidates[i];
+                    bestSolution = solution;
+                }
+            }
+
+            if (!level.IsInside(best) || bestSolution == null)
+            {
+                level.cat = new CatDefinition();
+                return false;
+            }
+
+            level.cat = new CatDefinition
+            {
+                behavior = CatBehavior.Curious,
+                startPosition = best,
+                horizontalFirst = true
+            };
+            level.expectedSolution.Clear();
+            level.expectedSolution.AddRange(bestSolution);
+            level.parMoves = bestSolution.Count;
+            level.threeStarMoveTarget = bestSolution.Count;
+            level.twoStarMoveTarget = bestSolution.Count + 3;
+            level.moveLimit = level.hardPathLimit
+                ? bestSolution.Count + 5
+                : 0;
+
+            return true;
+        }
+
+        private static int DistanceToRoute(
+            GridPosition position,
+            List<GridPosition> route)
+        {
+            int distance = int.MaxValue;
+            for (int i = 0; i < route.Count; i++)
+            {
+                distance = Math.Min(distance, Manhattan(position, route[i]));
+            }
+
+            return distance;
+        }
+
+        private static int Manhattan(GridPosition a, GridPosition b)
+        {
+            return Math.Abs(a.x - b.x) + Math.Abs(a.y - b.y);
         }
 
         private static void ApplyArchetype(

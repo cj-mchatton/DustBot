@@ -58,6 +58,14 @@ namespace DustBot
         Toy
     }
 
+    public enum CatBehavior
+    {
+        None,
+        Sleepy,
+        Curious,
+        Pouncy
+    }
+
     public enum FailureReason
     {
         None,
@@ -69,7 +77,8 @@ namespace DustBot
         GotStuck,
         ReturnedTooEarly,
         OutOfMoves,
-        LoopDetected
+        LoopDetected,
+        CatPounce
     }
 
     [Serializable]
@@ -199,6 +208,19 @@ namespace DustBot
     }
 
     [Serializable]
+    public class CatDefinition
+    {
+        public CatBehavior behavior;
+        public GridPosition startPosition = new GridPosition(-1, -1);
+        public bool horizontalFirst = true;
+
+        public bool IsEnabled
+        {
+            get { return behavior != CatBehavior.None; }
+        }
+    }
+
+    [Serializable]
     public class LevelDefinition
     {
         public string id;
@@ -224,6 +246,7 @@ namespace DustBot
         public List<SolutionStep> expectedSolution = new List<SolutionStep>();
         public LevelObjective objectives = new LevelObjective();
         public GridPosition bonusPosition = new GridPosition(-1, -1);
+        public CatDefinition cat = new CatDefinition();
 
         public CellContent GetContent(GridPosition position)
         {
@@ -306,6 +329,7 @@ namespace DustBot
         public int minimumRouteDecisions;
         public int minimumTemptingBranches;
         public int minimumBonusDetour;
+        public CatBehavior catBehavior;
     }
 
     [Serializable]

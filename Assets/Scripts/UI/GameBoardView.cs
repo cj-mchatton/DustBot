@@ -17,6 +17,8 @@ namespace DustBot
             public Image background;
             public Image contentSprite;
             public Image bonusSprite;
+            public Text invalidMarker;
+            public Text catDangerMarker;
             public Color baseColor;
             public Coroutine feedback;
         }
@@ -29,13 +31,20 @@ namespace DustBot
         private RectTransform routeLayer;
         private readonly List<Image> routeSegments = new List<Image>();
         private readonly List<Image> routeNodes = new List<Image>();
+        private readonly List<RectTransform> pawMarkers = new List<RectTransform>();
         private Image startGlow;
         private Image firstDirectionNub;
+        private RectTransform cat;
+        private Image catImage;
+        private Image catDangerGlow;
         private RectTransform bot;
         private Image botImage;
         private CosmeticSystem cosmetics;
         private System.Action<PathEditResult, GridPosition> onPathEdited;
+        private System.Action<Direction> onCatSwipe;
         private bool drawing;
+        private bool catSwipeStarted;
+        private Vector2 catSwipeStart;
         private bool hasLastPointerLocal;
         private Vector2 lastPointerLocal;
         private bool hasLastProcessedCell;
@@ -43,18 +52,20 @@ namespace DustBot
 
         private void Update()
         {
-            if (session == null || bot == null || session.State != GameSessionState.Editing)
+            if (session == null)
             {
                 return;
             }
 
             float wave = Mathf.Sin(Time.unscaledTime * 2.4f);
-            if (!drawing)
+            bool editing = session.State == GameSessionState.Editing ||
+                           session.State == GameSessionState.CatTurn;
+            if (editing && bot != null && !drawing)
             {
                 bot.localScale = Vector3.one * (0.92f + wave * 0.014f);
             }
 
-            if (startGlow != null)
+            if (editing && startGlow != null)
             {
                 float alpha = 0.21f + (wave + 1f) * 0.035f;
                 startGlow.color = new Color(
@@ -62,6 +73,24 @@ namespace DustBot
                     DustBotTheme.MintDark.g,
                     DustBotTheme.MintDark.b,
                     alpha);
+            }
+
+            if (cat != null && cat.gameObject.activeSelf && editing)
+            {
+                cat.anchoredPosition = new Vector2(0f, 3f + Mathf.Sin(Time.unscaledTime * 3.2f) * 3f);
+                cat.localRotation = Quaternion.Euler(
+                    0f,
+                    0f,
+                    Mathf.Sin(Time.unscaledTime * 2.1f) * 2.5f);
+                if (catDangerGlow != null)
+                {
+                    float dangerAlpha = 0.13f + (wave + 1f) * 0.05f;
+                    catDangerGlow.color = new Color(
+                        DustBotTheme.Warning.r,
+                        DustBotTheme.Warning.g,
+                        DustBotTheme.Warning.b,
+                        dangerAlpha);
+                }
             }
 
             if (cells == null)
@@ -90,7 +119,8 @@ namespace DustBot
             GameSession session,
             PlayerInputController input,
             CosmeticSystem cosmetics,
-            System.Action<PathEditResult, GridPosition> onPathEdited)
+            System.Action<PathEditResult, GridPosition> onPathEdited,
+            System.Action<Direction> onCatSwipe)
         {
             if (level == null) throw new System.ArgumentNullException("level");
             if (session == null) throw new System.ArgumentNullException("session");
@@ -101,6 +131,7 @@ namespace DustBot
             this.input = input;
             this.cosmetics = cosmetics;
             this.onPathEdited = onPathEdited;
+            this.onCatSwipe = onCatSwipe;
             boardRect = (RectTransform)transform;
             cells = new CellVisual[level.width, level.height];
 
@@ -115,6 +146,7 @@ namespace DustBot
 
             BuildCells();
             BuildRouteLayer();
+            BuildCat();
             BuildBot();
             RefreshAll();
         }
@@ -133,6 +165,8 @@ namespace DustBot
             PositionBot(session.BotPosition);
             bot.localRotation = Quaternion.identity;
             RefreshBotPresentation();
+            PositionCat(session.CatPosition);
+            RefreshCatPresentation();
         }
 
         public void RefreshCell(GridPosition position)
@@ -161,6 +195,8 @@ namespace DustBot
                             position == level.bonusPosition &&
                             !session.CollectedBonus;
             cell.bonusSprite.gameObject.SetActive(hasBonus);
+            cell.invalidMarker.gameObject.SetActive(false);
+            cell.catDangerMarker.gameObject.SetActive(false);
         }
 
         public void PlayTileFeedback(GridPosition position)
@@ -174,7 +210,7 @@ namespace DustBot
         {
             CellVisual cell = cells[position.x, position.y];
             PrepareCellFeedback(cell);
-            cell.feedback = StartCoroutine(PulseCellRoutine(cell, 0.24f, 0.16f));
+            cell.feedback = StartCoroutine(CrumbCleanRoutine(cell, position));
         }
 
         public void PlayInvalidFeedback(GridPosition position)
@@ -191,6 +227,23 @@ namespace DustBot
 
         public void OnPointerDown(PointerEventData eventData)
         {
+            if (session.HasCat &&
+                session.State == GameSessionState.CatTurn)
+            {
+                Vector2 catLocal;
+                if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                        boardRect,
+                        eventData.position,
+                        eventData.pressEventCamera,
+                        out catLocal))
+                {
+                    catSwipeStarted = true;
+                    catSwipeStart = catLocal;
+                }
+
+                return;
+            }
+
             if (session.State != GameSessionState.Editing)
             {
                 return;
@@ -229,6 +282,11 @@ namespace DustBot
 
         public void OnDrag(PointerEventData eventData)
         {
+            if (session.HasCat)
+            {
+                return;
+            }
+
             if (!drawing)
             {
                 return;
@@ -272,6 +330,34 @@ namespace DustBot
 
         public void OnPointerUp(PointerEventData eventData)
         {
+            if (catSwipeStarted)
+            {
+                catSwipeStarted = false;
+                Vector2 local;
+                if (RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                        boardRect,
+                        eventData.position,
+                        eventData.pressEventCamera,
+                        out local))
+                {
+                    Vector2 delta = local - catSwipeStart;
+                    float threshold = Mathf.Max(
+                        24f,
+                        Mathf.Min(
+                            boardRect.rect.width / level.width,
+                            boardRect.rect.height / level.height) * 0.18f);
+                    if (delta.magnitude >= threshold && onCatSwipe != null)
+                    {
+                        Direction direction = Mathf.Abs(delta.x) > Mathf.Abs(delta.y)
+                            ? delta.x > 0f ? Direction.Right : Direction.Left
+                            : delta.y > 0f ? Direction.Up : Direction.Down;
+                        onCatSwipe(direction);
+                    }
+                }
+
+                return;
+            }
+
             if (drawing)
             {
                 input.EndPath();
@@ -282,16 +368,77 @@ namespace DustBot
             hasLastProcessedCell = false;
         }
 
-        public IEnumerator AnimateBotTo(
-            GridPosition position,
-            Direction direction,
+        public IEnumerator AnimateCatTurn(
+            StepOutcome outcome,
+            System.Func<bool> isPaused)
+        {
+            yield return AnimateBotSlide(
+                outcome.from,
+                outcome.to,
+                outcome.direction,
+                0.115f,
+                isPaused);
+
+            float pause = 0f;
+            while (pause < 0.035f)
+            {
+                if (isPaused == null || !isPaused())
+                {
+                    pause += Time.unscaledDeltaTime;
+                }
+
+                yield return null;
+            }
+
+            if (outcome.catMoveCount > 0)
+            {
+                yield return AnimateCatSegment(
+                    outcome.catFrom,
+                    outcome.catFirst,
+                    0.085f,
+                    isPaused);
+                if (outcome.catMoveCount > 1)
+                {
+                    yield return AnimateCatSegment(
+                        outcome.catFirst,
+                        outcome.catTo,
+                        0.085f,
+                        isPaused);
+                }
+            }
+        }
+
+        public IEnumerator AnimateCruiseStep(
+            StepOutcome outcome,
             float duration,
             System.Func<bool> isPaused)
         {
             Vector2 start = bot.anchorMin;
-            Vector2 target = AnchorFor(position);
+            Vector2 target = AnchorFor(outcome.to);
             Quaternion startRotation = bot.localRotation;
-            Quaternion targetRotation = Quaternion.Euler(0f, 0f, RotationFor(direction));
+            Quaternion targetRotation = Quaternion.Euler(
+                0f,
+                0f,
+                RotationFor(outcome.direction));
+            bool animateCat = cat != null &&
+                              cat.gameObject.activeSelf &&
+                              outcome.catMoveCount > 0;
+            Vector2 catStart = animateCat ? AnchorFor(outcome.catFrom) : Vector2.zero;
+            Vector2 catFirst = animateCat ? AnchorFor(outcome.catFirst) : Vector2.zero;
+            Vector2 catTarget = animateCat ? AnchorFor(outcome.catTo) : Vector2.zero;
+            Quaternion catStartRotation = animateCat
+                ? cat.localRotation
+                : Quaternion.identity;
+            Direction catDirection = animateCat
+                ? DirectionUtility.Between(
+                    outcome.catMoveCount > 1 ? outcome.catFirst : outcome.catFrom,
+                    outcome.catTo)
+                : Direction.None;
+            Quaternion catTargetRotation = Quaternion.Euler(
+                0f,
+                0f,
+                RotationFor(catDirection));
+
             float elapsed = 0f;
             while (elapsed < duration)
             {
@@ -303,13 +450,46 @@ namespace DustBot
 
                 elapsed += Time.unscaledDeltaTime;
                 float t = Mathf.Clamp01(elapsed / duration);
-                t = 1f - Mathf.Pow(1f - t, 3f);
                 Vector2 anchor = Vector2.LerpUnclamped(start, target, t);
                 bot.anchorMin = anchor;
                 bot.anchorMax = anchor;
-                bot.localRotation = Quaternion.Slerp(startRotation, targetRotation, t);
-                float bounce = Mathf.Sin(t * Mathf.PI);
-                bot.localScale = new Vector3(1f + bounce * 0.08f, 1f - bounce * 0.05f, 1f);
+                bot.anchoredPosition = Vector2.zero;
+                bot.localScale = Vector3.one;
+                bot.localRotation = Quaternion.Slerp(
+                    startRotation,
+                    targetRotation,
+                    SmootherStep(Mathf.Min(1f, t * 1.8f)));
+
+                if (animateCat)
+                {
+                    float catT = Mathf.Clamp01((t - 0.28f) / 0.72f);
+                    Vector2 catAnchor;
+                    if (outcome.catMoveCount > 1)
+                    {
+                        catAnchor = catT < 0.5f
+                            ? Vector2.LerpUnclamped(catStart, catFirst, SmootherStep(catT * 2f))
+                            : Vector2.LerpUnclamped(catFirst, catTarget, SmootherStep((catT - 0.5f) * 2f));
+                    }
+                    else
+                    {
+                        catAnchor = Vector2.LerpUnclamped(
+                            catStart,
+                            catTarget,
+                            SmootherStep(catT));
+                    }
+
+                    SetCatAnchor(catAnchor);
+                    cat.anchoredPosition = Vector2.zero;
+                    cat.localRotation = Quaternion.Slerp(
+                        catStartRotation,
+                        catTargetRotation,
+                        SmootherStep(catT));
+                    float catPounce = outcome.catCollision
+                        ? Mathf.Sin(catT * Mathf.PI) * 0.18f
+                        : 0f;
+                    cat.localScale = Vector3.one * (1f + catPounce);
+                }
+
                 yield return null;
             }
 
@@ -318,10 +498,83 @@ namespace DustBot
             bot.anchoredPosition = Vector2.zero;
             bot.localRotation = targetRotation;
             bot.localScale = Vector3.one;
+            if (animateCat)
+            {
+                SetCatAnchor(catTarget);
+                cat.anchoredPosition = Vector2.zero;
+                cat.localRotation = catTargetRotation;
+                cat.localScale = Vector3.one;
+            }
+        }
+
+        public IEnumerator AnimateCatMovement(
+            StepOutcome outcome,
+            System.Func<bool> isPaused)
+        {
+            if (cat == null || !cat.gameObject.activeSelf)
+            {
+                yield break;
+            }
+
+            if (outcome.catMoveCount == 0)
+            {
+                if (outcome.catCollision)
+                {
+                    yield return AnimateCatPounce(isPaused);
+                }
+
+                yield break;
+            }
+
+            yield return AnimateCatSegment(
+                outcome.catFrom,
+                outcome.catFirst,
+                0.12f,
+                isPaused);
+            if (outcome.catMoveCount > 1)
+            {
+                yield return AnimateCatSegment(
+                    outcome.catFirst,
+                    outcome.catTo,
+                    0.105f,
+                    isPaused);
+            }
+
+            if (outcome.catCollision)
+            {
+                yield return AnimateCatPounce(isPaused);
+            }
+        }
+
+        public IEnumerator AnimateDockArrival()
+        {
+            float elapsed = 0f;
+            const float duration = 0.28f;
+            while (elapsed < duration)
+            {
+                elapsed += Time.unscaledDeltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                float settle = Mathf.Sin(t * Mathf.PI * 2.5f) * (1f - t);
+                bot.localScale = new Vector3(
+                    1f + settle * 0.08f,
+                    1f - settle * 0.055f,
+                    1f);
+                bot.localRotation = Quaternion.Euler(0f, 0f, settle * 8f);
+                yield return null;
+            }
+
+            bot.localScale = Vector3.one;
+            bot.localRotation = Quaternion.identity;
         }
 
         public IEnumerator AnimateFailure(StepOutcome outcome)
         {
+            if (outcome.failure == FailureReason.CatPounce)
+            {
+                yield return AnimateCatCollisionFailure();
+                yield break;
+            }
+
             Vector2 offset = DirectionUtility.ToOffset(outcome.direction).x != 0
                 ? new Vector2(DirectionUtility.ToOffset(outcome.direction).x * 24f, 0f)
                 : new Vector2(0f, DirectionUtility.ToOffset(outcome.direction).y * 24f);
@@ -344,7 +597,7 @@ namespace DustBot
                 if (animation == "fail_explosion")
                     bot.localScale = Vector3.one * (1f + Mathf.Sin(t * Mathf.PI) * 0.35f);
                 bot.localRotation = Quaternion.Euler(0f, 0f, rotation);
-                botImage.color = Color.Lerp(originalColor, DustBotTheme.Coral, Mathf.Sin(t * Mathf.PI));
+                botImage.color = Color.Lerp(originalColor, DustBotTheme.Error, Mathf.Sin(t * Mathf.PI));
                 yield return null;
             }
 
@@ -438,12 +691,55 @@ namespace DustBot
                     bonusShadow.effectDistance = new Vector2(0f, -3f);
                     bonusShadow.useGraphicAlpha = true;
 
+                    Text invalidMarker = UIFactory.CreateText(
+                        "Invalid X",
+                        root.transform,
+                        "×",
+                        58,
+                        DustBotTheme.Error);
+                    invalidMarker.fontStyle = FontStyle.Bold;
+                    invalidMarker.resizeTextForBestFit = true;
+                    invalidMarker.resizeTextMinSize = 24;
+                    invalidMarker.resizeTextMaxSize = 68;
+                    UIFactory.SetAnchors(
+                        invalidMarker.rectTransform,
+                        new Vector2(0.18f, 0.12f),
+                        new Vector2(0.82f, 0.88f),
+                        Vector2.zero,
+                        Vector2.zero);
+                    Outline invalidOutline = invalidMarker.gameObject.AddComponent<Outline>();
+                    invalidOutline.effectColor = new Color(1f, 1f, 1f, 0.95f);
+                    invalidOutline.effectDistance = new Vector2(3f, -3f);
+                    invalidMarker.gameObject.SetActive(false);
+
+                    Text catDangerMarker = UIFactory.CreateText(
+                        "Cat Danger",
+                        root.transform,
+                        "!",
+                        34,
+                        DustBotTheme.Error);
+                    catDangerMarker.fontStyle = FontStyle.Bold;
+                    UIFactory.SetAnchors(
+                        catDangerMarker.rectTransform,
+                        new Vector2(0.65f, 0.62f),
+                        new Vector2(0.96f, 0.96f),
+                        Vector2.zero,
+                        Vector2.zero);
+                    Outline dangerOutline =
+                        catDangerMarker.gameObject.AddComponent<Outline>();
+                    dangerOutline.effectColor = Color.white;
+                    dangerOutline.effectDistance = new Vector2(2f, -2f);
+                    catDangerMarker.transform.SetAsLastSibling();
+                    catDangerMarker.gameObject.SetActive(false);
+
                     cells[x, y] = new CellVisual
                     {
                         root = rootRect,
                         background = background,
                         contentSprite = contentSprite,
                         bonusSprite = bonusSprite,
+                        invalidMarker = invalidMarker,
+                        catDangerMarker = catDangerMarker,
                         baseColor = background.color
                     };
                 }
@@ -479,8 +775,52 @@ namespace DustBot
             bot.pivot = new Vector2(0.5f, 0.5f);
         }
 
+        private void BuildCat()
+        {
+            if (level.cat == null || !level.cat.IsEnabled)
+            {
+                return;
+            }
+
+            GameObject glowObject = UIFactory.CreateUIObject("Cat Danger Glow", transform);
+            catDangerGlow = glowObject.AddComponent<Image>();
+            catDangerGlow.sprite = SpriteFactory.Circle;
+            catDangerGlow.raycastTarget = false;
+            catDangerGlow.color = new Color(
+                DustBotTheme.Warning.r,
+                DustBotTheme.Warning.g,
+                DustBotTheme.Warning.b,
+                0.18f);
+            RectTransform glowRect = catDangerGlow.rectTransform;
+            float cellWidth = Mathf.Min(920f / level.width, 970f / level.height);
+            glowRect.sizeDelta = Vector2.one * Mathf.Clamp(cellWidth * 0.9f, 66f, 142f);
+
+            GameObject catObject = UIFactory.CreateUIObject("Pet Cat", transform);
+            catImage = catObject.AddComponent<Image>();
+            catImage.sprite = DustBotSprites.Cat;
+            catImage.color = Color.white;
+            catImage.preserveAspect = true;
+            catImage.raycastTarget = false;
+            Shadow shadow = catObject.AddComponent<Shadow>();
+            shadow.effectColor = new Color(0.18f, 0.1f, 0.05f, 0.24f);
+            shadow.effectDistance = new Vector2(0f, -5f);
+            cat = catObject.GetComponent<RectTransform>();
+            cat.sizeDelta = Vector2.one * Mathf.Clamp(cellWidth * 0.72f, 54f, 116f);
+            cat.pivot = new Vector2(0.5f, 0.5f);
+        }
+
         private void RefreshPath()
         {
+            if (session.HasCat)
+            {
+                DisableUnused(routeSegments, 0);
+                DisableUnused(routeNodes, 0);
+                startGlow.gameObject.SetActive(false);
+                firstDirectionNub.gameObject.SetActive(false);
+                RefreshCatPrediction();
+                return;
+            }
+
             IReadOnlyList<GridPosition> path = session.CurrentPathCells;
             float cellWidth = boardRect.rect.width / level.width;
             float cellHeight = boardRect.rect.height / level.height;
@@ -489,7 +829,7 @@ namespace DustBot
             Color routeColor = session.State == GameSessionState.Editing
                 ? session.CanStillEarnThreeStars
                     ? cosmetics.ActivePathColor
-                    : DustBotTheme.Coral
+                    : DustBotTheme.Warning
                 : new Color(
                     cosmetics.ActivePathColor.r,
                     cosmetics.ActivePathColor.g,
@@ -542,6 +882,8 @@ namespace DustBot
                 firstDirectionNub.rectTransform.sizeDelta = Vector2.one * (thickness * 1.45f);
                 firstDirectionNub.transform.SetAsLastSibling();
             }
+
+            RefreshCatPrediction();
         }
 
         private Image CreateRouteImage(string name, Sprite sprite)
@@ -667,6 +1009,174 @@ namespace DustBot
             bot.anchoredPosition = Vector2.zero;
         }
 
+        private void PositionCat(GridPosition position)
+        {
+            if (cat == null || !level.IsInside(position))
+            {
+                return;
+            }
+
+            SetCatAnchor(AnchorFor(position));
+            cat.anchoredPosition = Vector2.zero;
+            cat.localScale = Vector3.one;
+            cat.localRotation = Quaternion.identity;
+        }
+
+        private void RefreshCatPresentation()
+        {
+            if (cat == null)
+            {
+                return;
+            }
+
+            bool active = session.HasCat;
+            cat.gameObject.SetActive(active);
+            if (catDangerGlow != null)
+            {
+                catDangerGlow.gameObject.SetActive(active);
+            }
+        }
+
+        private void RefreshCatPrediction()
+        {
+            bool show = session != null &&
+                        session.State == GameSessionState.CatTurn &&
+                        session.HasCat;
+            if (!show)
+            {
+                HideCatDangerMarkers();
+                DisablePawMarkers(0);
+                return;
+            }
+
+            HideCatDangerMarkers();
+            int shown = 0;
+            Direction[] directions =
+            {
+                Direction.Up,
+                Direction.Right,
+                Direction.Down,
+                Direction.Left
+            };
+            for (int directionIndex = 0;
+                 directionIndex < directions.Length;
+                 directionIndex++)
+            {
+                GridPosition destination;
+                CatStepResult catStep;
+                FailureReason danger;
+                if (!session.TryPreviewCatTurn(
+                        directions[directionIndex],
+                        out destination,
+                        out catStep,
+                        out danger))
+                {
+                    continue;
+                }
+
+                if (danger != FailureReason.None &&
+                    session.Grid.IsInside(destination))
+                {
+                    cells[destination.x, destination.y]
+                        .catDangerMarker.gameObject.SetActive(true);
+                }
+
+                GridPosition[] catPositions =
+                {
+                    catStep.first,
+                    catStep.to
+                };
+                int count = catStep.moveCount == 0 ? 0 : catStep.moveCount;
+                for (int step = 0; step < count; step++)
+                {
+                    RectTransform marker = GetPawMarker(shown);
+                    marker.anchoredPosition = LocalCenterFor(catPositions[step]);
+                    marker.localScale = Vector3.one * (step == 0 ? 0.68f : 0.8f);
+                    Color color = danger == FailureReason.CatPounce
+                        ? DustBotTheme.Error
+                        : DustBotTheme.Warning;
+                    Image[] images = marker.GetComponentsInChildren<Image>(true);
+                    for (int imageIndex = 0; imageIndex < images.Length; imageIndex++)
+                    {
+                        images[imageIndex].color = new Color(
+                            color.r,
+                            color.g,
+                            color.b,
+                            danger == FailureReason.CatPounce ? 0.76f : 0.24f);
+                    }
+
+                    marker.gameObject.SetActive(true);
+                    marker.SetAsLastSibling();
+                    shown++;
+                }
+            }
+
+            DisablePawMarkers(shown);
+        }
+
+        private void HideCatDangerMarkers()
+        {
+            if (cells == null)
+            {
+                return;
+            }
+
+            for (int y = 0; y < level.height; y++)
+            {
+                for (int x = 0; x < level.width; x++)
+                {
+                    cells[x, y].catDangerMarker.gameObject.SetActive(false);
+                }
+            }
+        }
+
+        private RectTransform GetPawMarker(int index)
+        {
+            while (pawMarkers.Count <= index)
+            {
+                GameObject root = UIFactory.CreateUIObject(
+                    "Predicted Paw " + pawMarkers.Count,
+                    routeLayer);
+                RectTransform rect = root.GetComponent<RectTransform>();
+                rect.anchorMin = new Vector2(0.5f, 0.5f);
+                rect.anchorMax = new Vector2(0.5f, 0.5f);
+                rect.pivot = new Vector2(0.5f, 0.5f);
+                rect.sizeDelta = new Vector2(35f, 35f);
+
+                CreatePawPart(root.transform, "Pad", new Vector2(0f, -5f), new Vector2(18f, 15f));
+                CreatePawPart(root.transform, "Toe Left", new Vector2(-8f, 8f), new Vector2(8f, 9f));
+                CreatePawPart(root.transform, "Toe Center", new Vector2(0f, 11f), new Vector2(8f, 9f));
+                CreatePawPart(root.transform, "Toe Right", new Vector2(8f, 8f), new Vector2(8f, 9f));
+                pawMarkers.Add(rect);
+            }
+
+            return pawMarkers[index];
+        }
+
+        private static void CreatePawPart(
+            Transform parent,
+            string name,
+            Vector2 position,
+            Vector2 size)
+        {
+            GameObject part = UIFactory.CreateUIObject(name, parent);
+            Image image = part.AddComponent<Image>();
+            image.sprite = SpriteFactory.Circle;
+            image.raycastTarget = false;
+            image.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            image.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            image.rectTransform.anchoredPosition = position;
+            image.rectTransform.sizeDelta = size;
+        }
+
+        private void DisablePawMarkers(int used)
+        {
+            for (int i = used; i < pawMarkers.Count; i++)
+            {
+                pawMarkers[i].gameObject.SetActive(false);
+            }
+        }
+
         private void RefreshBotPresentation()
         {
             bool editing = session.State == GameSessionState.Editing;
@@ -718,25 +1228,216 @@ namespace DustBot
             cell.feedback = null;
         }
 
+        private IEnumerator CrumbCleanRoutine(CellVisual cell, GridPosition position)
+        {
+            Image crumb = cell.contentSprite;
+            crumb.gameObject.SetActive(true);
+            Color originalColor = crumb.color;
+            Vector3 originalScale = crumb.rectTransform.localScale;
+            Quaternion originalRotation = crumb.rectTransform.localRotation;
+            float elapsed = 0f;
+            const float duration = 0.3f;
+            while (elapsed < duration)
+            {
+                elapsed += Time.unscaledDeltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                float pop = Mathf.Sin(t * Mathf.PI);
+                cell.root.localScale = Vector3.one * (1f + pop * 0.11f);
+                crumb.rectTransform.localScale = originalScale * (1f + pop * 0.42f);
+                crumb.rectTransform.localRotation = Quaternion.Euler(0f, 0f, t * 115f);
+                crumb.color = new Color(
+                    originalColor.r,
+                    originalColor.g,
+                    originalColor.b,
+                    1f - SmootherStep(t));
+                yield return null;
+            }
+
+            cell.root.localScale = Vector3.one;
+            crumb.rectTransform.localScale = originalScale;
+            crumb.rectTransform.localRotation = originalRotation;
+            crumb.color = originalColor;
+            cell.feedback = null;
+            RefreshCell(position);
+        }
+
         private IEnumerator InvalidCellRoutine(CellVisual cell, GridPosition position)
         {
             float duration = 0.2f;
             float elapsed = 0f;
             Vector2 originalPosition = cell.root.anchoredPosition;
             Color originalColor = cell.background.color;
+            cell.invalidMarker.gameObject.SetActive(true);
+            cell.invalidMarker.rectTransform.localScale = Vector3.one * 0.7f;
             while (elapsed < duration)
             {
                 elapsed += Time.unscaledDeltaTime;
                 float t = Mathf.Clamp01(elapsed / duration);
                 float shake = Mathf.Sin(t * Mathf.PI * 7f) * (1f - t);
                 cell.root.anchoredPosition = originalPosition + new Vector2(shake * 7f, 0f);
-                cell.background.color = Color.Lerp(originalColor, DustBotTheme.Coral, Mathf.Sin(t * Mathf.PI) * 0.65f);
+                cell.background.color = Color.Lerp(originalColor, DustBotTheme.Error, Mathf.Sin(t * Mathf.PI) * 0.72f);
+                cell.invalidMarker.rectTransform.localScale =
+                    Vector3.one * Mathf.Lerp(0.7f, 1.12f, Mathf.Sin(t * Mathf.PI));
                 yield return null;
             }
 
             cell.root.anchoredPosition = originalPosition;
+            cell.invalidMarker.gameObject.SetActive(false);
             cell.feedback = null;
             RefreshCell(position);
+        }
+
+        private IEnumerator AnimateCatSegment(
+            GridPosition from,
+            GridPosition to,
+            float duration,
+            System.Func<bool> isPaused)
+        {
+            Vector2 start = AnchorFor(from);
+            Vector2 target = AnchorFor(to);
+            Direction direction = DirectionUtility.Between(from, to);
+            Quaternion startRotation = cat.localRotation;
+            Quaternion targetRotation = Quaternion.Euler(0f, 0f, RotationFor(direction));
+            float elapsed = 0f;
+            while (elapsed < duration)
+            {
+                if (isPaused != null && isPaused())
+                {
+                    yield return null;
+                    continue;
+                }
+
+                elapsed += Time.unscaledDeltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                float eased = SmootherStep(t);
+                SetCatAnchor(Vector2.LerpUnclamped(start, target, eased));
+                cat.anchoredPosition = Vector2.zero;
+                cat.localRotation = Quaternion.Slerp(startRotation, targetRotation, eased);
+                cat.localScale = Vector3.one;
+                yield return null;
+            }
+
+            SetCatAnchor(target);
+            cat.anchoredPosition = Vector2.zero;
+            cat.localRotation = targetRotation;
+            cat.localScale = Vector3.one;
+        }
+
+        private IEnumerator AnimateBotSlide(
+            GridPosition from,
+            GridPosition to,
+            Direction direction,
+            float duration,
+            System.Func<bool> isPaused)
+        {
+            Vector2 start = AnchorFor(from);
+            Vector2 target = AnchorFor(to);
+            Quaternion startRotation = bot.localRotation;
+            Quaternion targetRotation = Quaternion.Euler(
+                0f,
+                0f,
+                RotationFor(direction));
+            float elapsed = 0f;
+            while (elapsed < duration)
+            {
+                if (isPaused != null && isPaused())
+                {
+                    yield return null;
+                    continue;
+                }
+
+                elapsed += Time.unscaledDeltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                Vector2 anchor = Vector2.LerpUnclamped(start, target, SmootherStep(t));
+                bot.anchorMin = anchor;
+                bot.anchorMax = anchor;
+                bot.anchoredPosition = Vector2.zero;
+                bot.localRotation = Quaternion.Slerp(
+                    startRotation,
+                    targetRotation,
+                    SmootherStep(t));
+                bot.localScale = Vector3.one;
+                yield return null;
+            }
+
+            PositionBot(to);
+            bot.localRotation = targetRotation;
+            bot.localScale = Vector3.one;
+        }
+
+        private IEnumerator AnimateCatPounce(System.Func<bool> isPaused)
+        {
+            float elapsed = 0f;
+            const float duration = 0.16f;
+            while (elapsed < duration)
+            {
+                if (isPaused != null && isPaused())
+                {
+                    yield return null;
+                    continue;
+                }
+
+                elapsed += Time.unscaledDeltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                float pounce = Mathf.Sin(t * Mathf.PI);
+                cat.localScale = Vector3.one * (1f + pounce * 0.28f);
+                cat.localRotation *= Quaternion.Euler(0f, 0f, Mathf.Sin(t * Mathf.PI * 3f) * 5f);
+                yield return null;
+            }
+
+            cat.localScale = Vector3.one;
+        }
+
+        private IEnumerator AnimateCatCollisionFailure()
+        {
+            Color originalColor = botImage.color;
+            float elapsed = 0f;
+            const float duration = 0.46f;
+            while (elapsed < duration)
+            {
+                elapsed += Time.unscaledDeltaTime;
+                float t = Mathf.Clamp01(elapsed / duration);
+                float impact = Mathf.Sin(Mathf.Min(1f, t * 2f) * Mathf.PI);
+                float wobble = Mathf.Sin(t * Mathf.PI * 7f) * (1f - t);
+                bot.localScale = new Vector3(
+                    1f + impact * 0.18f,
+                    1f - impact * 0.28f,
+                    1f);
+                bot.localRotation = Quaternion.Euler(0f, 0f, wobble * 18f);
+                botImage.color = Color.Lerp(originalColor, DustBotTheme.Error, impact * 0.72f);
+                if (cat != null)
+                {
+                    cat.localScale = Vector3.one * (1f + impact * 0.2f);
+                }
+
+                yield return null;
+            }
+
+            bot.localScale = Vector3.one;
+            bot.localRotation = Quaternion.identity;
+            botImage.color = originalColor;
+            if (cat != null)
+            {
+                cat.localScale = Vector3.one;
+            }
+        }
+
+        private void SetCatAnchor(Vector2 anchor)
+        {
+            cat.anchorMin = anchor;
+            cat.anchorMax = anchor;
+            if (catDangerGlow != null)
+            {
+                catDangerGlow.rectTransform.anchorMin = anchor;
+                catDangerGlow.rectTransform.anchorMax = anchor;
+                catDangerGlow.rectTransform.anchoredPosition = Vector2.zero;
+            }
+        }
+
+        private static float SmootherStep(float t)
+        {
+            t = Mathf.Clamp01(t);
+            return t * t * t * (t * (t * 6f - 15f) + 10f);
         }
 
         private static float RotationFor(Direction direction)

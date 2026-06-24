@@ -18,6 +18,10 @@ namespace DustBot
                 ValidateOrThrow(tutorial);
                 mainOverrides[levelNumber] = tutorial;
             }
+
+            LevelDefinition catTutorial = CatTutorialLevelCatalog.GetIntroduction();
+            ValidateOrThrow(catTutorial);
+            mainOverrides[catTutorial.levelNumber] = catTutorial;
         }
 
         public LevelDefinition LoadMain(int levelNumber)

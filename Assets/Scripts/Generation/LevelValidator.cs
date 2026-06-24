@@ -35,6 +35,12 @@ namespace DustBot
                 return false;
             }
 
+            if (level.cat == null)
+            {
+                message = "The moving-obstacle definition is null.";
+                return false;
+            }
+
             HashSet<GridPosition> occupied = new HashSet<GridPosition>();
             int startCount = 0;
             int dockCount = 0;
@@ -151,7 +157,9 @@ namespace DustBot
                     return false;
                 }
 
-                if (!visited.Add(current) && current != dock)
+                if (!visited.Add(current) &&
+                    current != dock &&
+                    !level.cat.IsEnabled)
                 {
                     message = "The expected route revisits a tile.";
                     return false;
@@ -177,6 +185,70 @@ namespace DustBot
             {
                 message = "Bonus objective is not reachable on the expected route.";
                 return false;
+            }
+
+            if (!Enum.IsDefined(typeof(CatBehavior), level.cat.behavior))
+            {
+                message = "The cat uses an unsupported behavior.";
+                return false;
+            }
+
+            if (level.cat.IsEnabled)
+            {
+                if (!level.IsInside(level.cat.startPosition))
+                {
+                    message = "The cat starts outside the board.";
+                    return false;
+                }
+
+                if (level.GetContent(level.cat.startPosition) != CellContent.Empty ||
+                    level.cat.startPosition == level.bonusPosition)
+                {
+                    message = "The cat must start on an unoccupied floor tile.";
+                    return false;
+                }
+
+                List<GridPosition> expectedRoute = CatObstacleSimulator.BuildExpectedRoute(level);
+                CatRoutePreview catPreview = CatObstacleSimulator.SimulateRoute(
+                    level,
+                    expectedRoute);
+                if (catPreview.collided)
+                {
+                    message = "The expected route is caught by the cat at step " +
+                              catPreview.collisionStep + ".";
+                    return false;
+                }
+
+                CatRelevanceReport relevance = CatObstacleSimulator.AnalyzeRelevance(
+                    level,
+                    expectedRoute);
+                if (!relevance.IsStrategicallyActive)
+                {
+                    message = string.Format(
+                        "The cat is trapped or negligible: open {0}, reachable {1}, movement {2}, unique {3}, closest {4}, pressure {5}.",
+                        relevance.openStartNeighbors,
+                        relevance.reachableTiles,
+                        relevance.movementTurns,
+                        relevance.uniqueVisitedTiles,
+                        relevance.closestDistance,
+                        relevance.pressureTurns);
+                    return false;
+                }
+
+                List<SolutionStep> verifiedSolution;
+                int searchLimit = level.moveLimit > 0
+                    ? level.moveLimit
+                    : Math.Max(
+                        level.expectedSolution.Count + 12,
+                        level.width * level.height * 2);
+                if (!CatLevelSolver.TrySolve(
+                        level,
+                        searchLimit,
+                        out verifiedSolution))
+                {
+                    message = "The cat level has no valid turn-based cleaning solution.";
+                    return false;
+                }
             }
 
             message = "Valid";
@@ -211,7 +283,11 @@ namespace DustBot
                 .Append(level.objectives.noUndoStar ? '1' : '0')
                 .Append(level.objectives.bonusRequiredForThreeStars ? '1' : '0').Append('|')
                 .Append(level.bonusPosition.x.ToString(CultureInfo.InvariantCulture)).Append(',')
-                .Append(level.bonusPosition.y.ToString(CultureInfo.InvariantCulture));
+                .Append(level.bonusPosition.y.ToString(CultureInfo.InvariantCulture)).Append('|')
+                .Append((int)level.cat.behavior).Append(':')
+                .Append(level.cat.startPosition.x.ToString(CultureInfo.InvariantCulture)).Append(',')
+                .Append(level.cat.startPosition.y.ToString(CultureInfo.InvariantCulture)).Append(':')
+                .Append(level.cat.horizontalFirst ? 'H' : 'V');
 
             for (int y = 0; y < level.height; y++)
             {

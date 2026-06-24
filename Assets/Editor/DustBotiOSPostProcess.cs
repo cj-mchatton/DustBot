@@ -26,6 +26,13 @@ namespace DustBot.Editor
             root.SetBoolean("UIViewControllerBasedStatusBarAppearance", false);
             root.SetBoolean("UIApplicationSupportsIndirectInputEvents", true);
             plist.WriteToFile(plistPath);
+
+            string projectPath = PBXProject.GetPBXProjectPath(path);
+            PBXProject project = new PBXProject();
+            project.ReadFromFile(projectPath);
+            string frameworkTarget = project.GetUnityFrameworkTargetGuid();
+            project.AddFrameworkToProject(frameworkTarget, "AVFoundation.framework", false);
+            project.WriteToFile(projectPath);
         }
     }
 }

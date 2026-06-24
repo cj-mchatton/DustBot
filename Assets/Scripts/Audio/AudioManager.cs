@@ -17,6 +17,8 @@ namespace DustBot
         private AudioClip fail;
         private AudioClip hint;
         private AudioClip reward;
+        private AudioClip catStep;
+        private AudioClip catPounce;
         private bool soundEnabled = true;
         private bool musicEnabled = true;
 
@@ -38,15 +40,29 @@ namespace DustBot
 
         private void Awake()
         {
+            if (FindAnyObjectByType<AudioListener>() == null)
+            {
+                AudioListener listener = gameObject.AddComponent<AudioListener>();
+                listener.enabled = true;
+            }
+
+            AudioListener.pause = false;
+            AudioListener.volume = 1f;
+            IOSAudioSession.Configure();
+
             effectsSource = gameObject.AddComponent<AudioSource>();
             effectsSource.playOnAwake = false;
             effectsSource.spatialBlend = 0f;
+            effectsSource.ignoreListenerPause = true;
+            effectsSource.priority = 32;
 
             musicSource = gameObject.AddComponent<AudioSource>();
             musicSource.playOnAwake = false;
             musicSource.loop = true;
             musicSource.spatialBlend = 0f;
             musicSource.volume = 0.14f;
+            musicSource.ignoreListenerPause = true;
+            musicSource.priority = 96;
 
             buttonTap = CreateTone("Button Tap", 510f, 0.055f, 0.18f, 0.45f);
             pathEdit = CreateTone("Path Edit", 690f, 0.045f, 0.12f, 0.52f);
@@ -57,6 +73,8 @@ namespace DustBot
             fail = CreateDescendingTone("Fail", 245f, 130f, 0.32f, 0.2f);
             hint = CreateArpeggio("Hint", new[] { 659.25f, 880f }, 0.1f, 0.16f);
             reward = CreateArpeggio("Reward", new[] { 784f, 988f, 1175f }, 0.08f, 0.18f);
+            catStep = CreateTone("Cat Step", 330f, 0.055f, 0.1f, 0.18f);
+            catPounce = CreateDescendingTone("Cat Pounce", 520f, 230f, 0.18f, 0.17f);
             musicSource.clip = CreateMusicLoop();
             RefreshMusic();
         }
@@ -70,6 +88,29 @@ namespace DustBot
         public void PlayFail() { Play(fail, 0.9f); }
         public void PlayHint() { Play(hint, 0.85f); }
         public void PlayReward() { Play(reward, 0.9f); }
+        public void PlayCatStep(bool pounce) { Play(pounce ? catPounce : catStep, pounce ? 0.9f : 0.48f); }
+
+        private void OnApplicationFocus(bool hasFocus)
+        {
+            if (!hasFocus)
+            {
+                return;
+            }
+
+            AudioListener.pause = false;
+            IOSAudioSession.Configure();
+            RefreshMusic();
+        }
+
+        private void OnApplicationPause(bool pauseStatus)
+        {
+            if (!pauseStatus)
+            {
+                AudioListener.pause = false;
+                IOSAudioSession.Configure();
+                RefreshMusic();
+            }
+        }
 
         private void Play(AudioClip clip, float volume)
         {

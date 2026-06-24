@@ -1,5 +1,6 @@
 #if UNITY_EDITOR
 using System;
+using System.Collections.Generic;
 using System.IO;
 using UnityEditor;
 using UnityEditor.Build;
@@ -73,7 +74,8 @@ namespace DustBot.Editor
                 ValidateAndSimulate(loader.LoadMain(i), "Tutorial " + i);
             }
 
-            int[] deterministicChecks = { 16, 20, 50, 100, 500, 1000, 2000, 4000, 6000 };
+            int[] deterministicChecks = { 16, 20, 30, 45, 50, 100, 180, 500, 1000, 2000, 4000, 6000 };
+            int catLevelCount = 0;
             for (int number = LevelManifest.TutorialLevelCount + 1;
                  number <= LevelManifest.MainJourneyLevelCount;
                  number++)
@@ -87,7 +89,7 @@ namespace DustBot.Editor
                         "Main level " + number + " was not deterministic.");
                 }
 
-                if (number > 25)
+                if (number > 25 && number != 30)
                 {
                     LevelEngagementReport engagement = LevelEngagementEvaluator.Analyze(first);
                     Require(!engagement.tooTrivial, "Main level " + number + " was accepted as trivial.");
@@ -113,8 +115,38 @@ namespace DustBot.Editor
                     }
                 }
 
+                if (first.cat != null && first.cat.IsEnabled)
+                {
+                    catLevelCount++;
+                    List<GridPosition> catRoute = CatObstacleSimulator.BuildExpectedRoute(first);
+                    CatRoutePreview preview = CatObstacleSimulator.SimulateRoute(
+                        first,
+                        catRoute);
+                    Require(
+                        !preview.collided,
+                        "Main level " + number + " has an unsafe canonical cat route.");
+                    CatRelevanceReport relevance =
+                        CatObstacleSimulator.AnalyzeRelevance(first, catRoute);
+                    Require(
+                        relevance.IsStrategicallyActive,
+                        string.Format(
+                            "Main level {0} has a trapped or negligible cat: open {1}, reachable {2}, movement {3}, unique {4}, closest {5}, pressure {6}.",
+                            number,
+                            relevance.openStartNeighbors,
+                            relevance.reachableTiles,
+                            relevance.movementTurns,
+                            relevance.uniqueVisitedTiles,
+                            relevance.closestDistance,
+                            relevance.pressureTurns));
+                }
+
                 ValidateAndSimulate(first, "Main " + number);
             }
+
+            Require(catLevelCount >= 500, "Too few canonical levels use the cat mechanic.");
+            Require(
+                loader.LoadMain(30).cat.behavior == CatBehavior.Curious,
+                "The Curious Cat introduction level is missing.");
 
             DateTime date = new DateTime(2026, 6, 22);
             LevelDefinition dailyA = loader.LoadDaily(date);
@@ -140,8 +172,80 @@ namespace DustBot.Editor
             ValidateAndSimulate(masterA, "Master 500");
 
             ValidateHazardBlocking(loader.LoadMain(7));
+            ValidateCatTurnMechanic(loader.LoadMain(30));
             ValidateProgression();
-            Debug.Log("DUSTBOT_VALIDATION_PASSED: 6,000 canonical journey levels, engagement pacing, archetypes, tutorials, daily, master, deterministic generation, economy claims, cosmetics, route simulation, hazards, and progression.");
+            Debug.Log(
+                "DUSTBOT_VALIDATION_PASSED: 6,000 canonical journey levels, " +
+                catLevelCount +
+                " deterministic cat levels, engagement pacing, archetypes, tutorials, " +
+                "daily, master, economy claims, cosmetics, route simulation, hazards, and progression.");
+        }
+
+        [MenuItem("DustBot/Audit Cat Relevance")]
+        public static void AuditCatRelevance()
+        {
+            LevelLoader loader = new LevelLoader();
+            int catLevels = 0;
+            int weakLevels = 0;
+            int trappedLevels = 0;
+            int minimumReachable = int.MaxValue;
+            int minimumUnique = int.MaxValue;
+            int minimumMovement = int.MaxValue;
+            int maximumClosestDistance = 0;
+            int minimumPressureTurns = int.MaxValue;
+
+            for (int number = 1; number <= LevelManifest.MainJourneyLevelCount; number++)
+            {
+                LevelDefinition level = loader.LoadMain(number);
+                if (level.cat == null || !level.cat.IsEnabled)
+                {
+                    continue;
+                }
+
+                catLevels++;
+                CatRelevanceReport relevance = CatObstacleSimulator.AnalyzeRelevance(
+                    level,
+                    CatObstacleSimulator.BuildExpectedRoute(level));
+                minimumReachable = Math.Min(minimumReachable, relevance.reachableTiles);
+                minimumUnique = Math.Min(minimumUnique, relevance.uniqueVisitedTiles);
+                minimumMovement = Math.Min(minimumMovement, relevance.movementTurns);
+                maximumClosestDistance = Math.Max(maximumClosestDistance, relevance.closestDistance);
+                minimumPressureTurns = Math.Min(minimumPressureTurns, relevance.pressureTurns);
+                if (relevance.openStartNeighbors == 0 || relevance.reachableTiles < 4)
+                {
+                    trappedLevels++;
+                }
+
+                if (!relevance.IsStrategicallyActive)
+                {
+                    weakLevels++;
+                    Debug.LogWarning(
+                        string.Format(
+                            "CAT_RELEVANCE_WEAK level {0}: behavior={1}, open={2}, reachable={3}, moves={4}, unique={5}, closest={6}, pressure={7}",
+                            number,
+                            level.cat.behavior,
+                            relevance.openStartNeighbors,
+                            relevance.reachableTiles,
+                            relevance.movementTurns,
+                            relevance.uniqueVisitedTiles,
+                            relevance.closestDistance,
+                            relevance.pressureTurns));
+                }
+            }
+
+            Debug.Log(
+                string.Format(
+                    "DUSTBOT_CAT_AUDIT: cats={0}, weak={1}, trapped={2}, minimum reachable={3}, minimum unique={4}, minimum movement turns={5}, maximum closest distance={6}, minimum pressure turns={7}",
+                    catLevels,
+                    weakLevels,
+                    trappedLevels,
+                    minimumReachable,
+                    minimumUnique,
+                    minimumMovement,
+                    maximumClosestDistance,
+                    minimumPressureTurns));
+            Require(weakLevels == 0, weakLevels + " cat levels failed the relevance audit.");
+            Require(trappedLevels == 0, trappedLevels + " cat levels were trapped.");
         }
 
         [MenuItem("DustBot/Build iOS Release")]
@@ -218,6 +322,33 @@ namespace DustBot.Editor
             Require(LevelValidator.TryValidate(level, out message), label + " invalid: " + message);
 
             GameSession session = new GameSession(level);
+            if (session.HasCat)
+            {
+                Require(
+                    session.State == GameSessionState.CatTurn,
+                    label + " did not start in cat-turn mode.");
+                for (int i = 0; i < level.expectedSolution.Count; i++)
+                {
+                    StepOutcome outcome;
+                    Require(
+                        session.TryCatTurn(
+                            level.expectedSolution[i].direction,
+                            out outcome),
+                        label + " rejected expected cat turn " + i +
+                        " while " + session.State +
+                        " after " + session.FailureReason + ".");
+                    if (session.State == GameSessionState.Failed)
+                    {
+                        break;
+                    }
+                }
+
+                Require(
+                    session.State == GameSessionState.Won,
+                    label + " expected cat-turn solution did not win.");
+                return;
+            }
+
             Require(
                 session.BeginPath(session.Grid.Start) == PathEditResult.Started,
                 label + " could not begin its route.");
@@ -250,6 +381,50 @@ namespace DustBot.Editor
             Require(
                 session.TryExtendPath(new GridPosition(1, 3)) == PathEditResult.Invalid,
                 "Sock hazard did not block path drawing.");
+        }
+
+        private static void ValidateCatTurnMechanic(LevelDefinition tutorial)
+        {
+            GameSession session = new GameSession(tutorial);
+            GridPosition initialCat = session.CatPosition;
+            StepOutcome blockedOutcome;
+            Require(
+                !session.TryCatTurn(Direction.Left, out blockedOutcome),
+                "Cat tutorial consumed a blocked swipe.");
+            Require(
+                session.Moves == 0 && session.CatPosition == initialCat,
+                "A blocked swipe moved DustBot or the cat.");
+
+            GridPosition hintTarget;
+            Require(
+                session.ApplyNextHint(out hintTarget),
+                "Cat tutorial could not provide a safe one-move hint.");
+            Require(
+                session.UsedHint &&
+                session.BotPosition == session.Grid.Start &&
+                hintTarget != session.Grid.Start,
+                "A Cat Chase hint moved DustBot or failed to mark hint use.");
+
+            GridPosition destination;
+            CatStepResult preview;
+            FailureReason danger;
+            Require(
+                session.TryPreviewCatTurn(
+                    Direction.Up,
+                    out destination,
+                    out preview,
+                    out danger) &&
+                danger == FailureReason.None &&
+                preview.moveCount == 2,
+                "Cat tutorial did not preview two deterministic cat moves.");
+
+            StepOutcome firstTurn;
+            Require(
+                session.TryCatTurn(Direction.Up, out firstTurn) &&
+                firstTurn.moved &&
+                firstTurn.catMoveCount == 2 &&
+                firstTurn.catFrom == initialCat,
+                "Cat tutorial did not execute DustBot first and two cat moves second.");
         }
 
         private static void ValidateProgression()
