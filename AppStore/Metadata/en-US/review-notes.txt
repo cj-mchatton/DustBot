@@ -1,0 +1,11 @@
+DustBot is a fully offline single-player puzzle game.
+
+No login, account, network connection, ads, in-app purchases, or special review credentials are required.
+
+To test:
+1. Launch the app.
+2. Tap Continue.
+3. Drag from DustBot through the route to the dock.
+4. Press Play.
+
+The first 15 levels introduce all controls and hazards. Main Journey, Daily Challenge, Endless Clean, Settings, and How to Play are available from the main menu. Master Clean unlocks after the 6,000-level journey; it is intentionally locked in release builds.
