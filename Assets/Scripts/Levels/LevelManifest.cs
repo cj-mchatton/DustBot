@@ -6,8 +6,8 @@ namespace DustBot
     public sealed class LevelManifest
     {
         public const int MainJourneyLevelCount = 6000;
-        public const int TutorialLevelCount = 15;
-        public const int CurrentGenerationVersion = 5;
+        public const int TutorialLevelCount = 3;
+        public const int CurrentGenerationVersion = 7;
 
         public LevelManifestEntry GetMainEntry(int levelNumber)
         {
@@ -16,104 +16,131 @@ namespace DustBot
             int width;
             int height;
 
+            LevelArchetype archetype = SelectMainArchetype(levelNumber);
+            bool largeMaze = false;
             if (levelNumber <= TutorialLevelCount)
             {
                 tier = DifficultyTier.Tutorial;
-                width = 4;
-                height = 4;
+                width = levelNumber == TutorialLevelCount ? 5 : 4;
+                height = width;
             }
             else if (levelNumber <= 20)
             {
                 tier = DifficultyTier.Beginner;
-                width = 5;
-                height = 5;
+                width = levelNumber % 4 == 0 ? 7 : 6;
+                height = levelNumber % 5 == 0 ? 7 : 6;
             }
             else if (levelNumber <= 35)
             {
                 tier = DifficultyTier.Easy;
-                width = levelNumber % 3 == 0 ? 6 : 5;
-                height = levelNumber % 4 == 0 ? 6 : 5;
+                width = levelNumber % 3 == 0 ? 7 : 6;
+                height = levelNumber % 4 == 0 ? 7 : 6;
             }
             else if (levelNumber <= 60)
             {
                 tier = DifficultyTier.Medium;
-                width = 6;
-                height = 6;
+                width = levelNumber % 3 == 0 ? 9 : 8;
+                height = levelNumber % 4 == 0 ? 9 : 8;
+                largeMaze = archetype == LevelArchetype.BlockerMaze ||
+                            archetype == LevelArchetype.TrickRoute;
             }
             else if (levelNumber <= 100)
             {
                 tier = DifficultyTier.Medium;
-                width = levelNumber % 3 == 0 ? 7 : 6;
-                height = levelNumber % 4 == 0 ? 7 : 6;
+                width = levelNumber % 3 == 0 ? 10 : 9;
+                height = levelNumber % 4 == 0 ? 10 : 9;
+                largeMaze = archetype == LevelArchetype.BlockerMaze ||
+                            archetype == LevelArchetype.TrickRoute ||
+                            archetype == LevelArchetype.ChallengeRoute;
             }
             else if (levelNumber <= 250)
             {
                 tier = DifficultyTier.Hard;
-                width = levelNumber % 3 == 0 ? 7 : 6;
-                height = 7;
+                width = levelNumber % 3 == 0 ? 13 : 12;
+                height = levelNumber % 4 == 0 ? 13 : 12;
+                largeMaze = IsLargeMazeArchetype(archetype);
             }
             else if (levelNumber <= 500)
             {
                 tier = DifficultyTier.Hard;
-                width = 7;
-                height = levelNumber % 4 == 0 ? 8 : 7;
+                width = levelNumber % 3 == 0 ? 14 : 13;
+                height = levelNumber % 4 == 0 ? 14 : 13;
+                largeMaze = IsLargeMazeArchetype(archetype);
             }
             else if (levelNumber <= 1000)
             {
                 tier = DifficultyTier.Hard;
-                width = 7;
-                height = 8;
+                width = levelNumber % 3 == 0 ? 15 : 14;
+                height = levelNumber % 5 == 0 ? 15 : 14;
+                largeMaze = IsLargeMazeArchetype(archetype);
             }
             else if (levelNumber <= 4000)
             {
                 tier = DifficultyTier.Expert;
-                width = 8;
-                height = levelNumber <= 2000 ? 8 : 9;
+                width = 15 + levelNumber % 4;
+                height = 15 + (levelNumber / 3) % 4;
+                largeMaze = IsLargeMazeArchetype(archetype);
             }
             else
             {
                 tier = DifficultyTier.Master;
-                width = 8;
-                height = 9;
+                width = 18 + levelNumber % 4;
+                height = 18 + (levelNumber / 3) % 4;
+                largeMaze = true;
             }
 
-            return CreateEntry(
+            if (tier >= DifficultyTier.Hard && !largeMaze)
+            {
+                width = tier >= DifficultyTier.Expert ? 10 : 9;
+                height = tier >= DifficultyTier.Expert ? 10 : 9;
+            }
+
+            LevelManifestEntry entry = CreateEntry(
                 levelNumber,
                 string.Format(CultureInfo.InvariantCulture, "DustBot_Main_{0:0000}", levelNumber),
                 tier,
                 width,
                 height,
-                SelectMainArchetype(levelNumber),
+                archetype,
                 false);
+            entry.useLargeMaze = largeMaze;
+            return entry;
         }
 
         public LevelManifestEntry GetMasterEntry(int levelNumber)
         {
             levelNumber = Math.Max(1, levelNumber);
-            int variant = (levelNumber - 1) % 3;
-            return CreateEntry(
+            int variant = (levelNumber - 1) % 5;
+            LevelManifestEntry entry = CreateEntry(
                 levelNumber,
                 string.Format(CultureInfo.InvariantCulture, "DustBot_Master_{0:0000}", levelNumber),
                 DifficultyTier.Master,
-                variant == 0 ? 7 : 8,
-                variant == 2 ? 9 : 8,
+                18 + variant,
+                18 + ((variant + 2) % 5),
                 SelectChallengeArchetype(DeterministicRandom.StableHash("Master_" + levelNumber)),
                 false);
+            entry.useLargeMaze = true;
+            return entry;
         }
 
         public LevelManifestEntry GetDailyEntry(DateTime date)
         {
             string dateKey = date.ToString("yyyy_MM_dd", CultureInfo.InvariantCulture);
             uint hash = DeterministicRandom.StableHash(dateKey);
-            DifficultyTier tier = hash % 4 == 0 ? DifficultyTier.Hard : DifficultyTier.Medium;
-            return CreateEntry(
+            bool largeMaze = hash % 5 < 2;
+            DifficultyTier tier = largeMaze
+                ? (hash % 3 == 0 ? DifficultyTier.Expert : DifficultyTier.Hard)
+                : DifficultyTier.Medium;
+            LevelManifestEntry entry = CreateEntry(
                 int.Parse(date.ToString("yyyyMMdd", CultureInfo.InvariantCulture), CultureInfo.InvariantCulture),
                 "DustBot_Daily_" + dateKey,
                 tier,
-                7 + (int)(hash % 2),
-                7 + (int)((hash >> 2) % 2),
+                largeMaze ? 12 + (int)(hash % 5) : 8 + (int)(hash % 3),
+                largeMaze ? 12 + (int)((hash >> 3) % 5) : 8 + (int)((hash >> 2) % 3),
                 SelectChallengeArchetype(hash),
                 true);
+            entry.useLargeMaze = largeMaze;
+            return entry;
         }
 
         public LevelManifestEntry GetEndlessEntry(string runSeed, int levelNumber)
@@ -145,12 +172,14 @@ namespace DustBot
             {
                 levelNumber = levelNumber,
                 seed = seed,
+                generationMode = GenerationMode.ProductionCampaign,
                 generationVersion = CurrentGenerationVersion,
                 difficultyTier = tier,
                 boardWidth = width,
                 boardHeight = height,
                 archetype = archetype,
                 useDailyChallengeProfile = dailyProfile,
+                routeModifierStyle = RouteModifierStyle.Mixed,
                 mechanicSet = "DrawPath",
                 objectiveSet = "CleanAllAndDock",
                 themeId = "CozyHome"
@@ -204,6 +233,17 @@ namespace DustBot
                 LevelArchetype.ChallengeRoute
             };
             return choices[(int)(hash % (uint)choices.Length)];
+        }
+
+        private static bool IsLargeMazeArchetype(LevelArchetype archetype)
+        {
+            return archetype == LevelArchetype.BlockerMaze ||
+                   archetype == LevelArchetype.CrumbOrder ||
+                   archetype == LevelArchetype.HazardAvoidance ||
+                   archetype == LevelArchetype.DustBunnyDetour ||
+                   archetype == LevelArchetype.TightPath ||
+                   archetype == LevelArchetype.TrickRoute ||
+                   archetype == LevelArchetype.ChallengeRoute;
         }
     }
 }

@@ -9,6 +9,7 @@ namespace DustBot
         private DustBotApp app;
         private RectTransform safeArea;
         private GameObject currentScreen;
+        private GameObject modalOverlay;
         private Image background;
 
         public void Initialize(DustBotApp application)
@@ -24,14 +25,19 @@ namespace DustBot
 
         public void ShowMainMenu()
         {
+            if (app.Audio != null) app.Audio.PlayMenuMusic();
             SwitchTo(MenuScreens.BuildMainMenu(app, safeArea));
         }
 
         public void ShowLevelSelect(int page = -1)
         {
+            if (app.Audio != null) app.Audio.PlayMenuMusic();
             if (page < 0)
             {
-                page = (app.Progression.Data.highestUnlockedMainLevel - 1) / MenuScreens.LevelsPerPage;
+                int level = app.Levels.ActiveGenerationMode == GenerationMode.ProductionCampaign
+                    ? app.Progression.Data.highestUnlockedMainLevel
+                    : app.CurrentCampaignLevel;
+                page = (level - 1) / MenuScreens.LevelsPerPage;
             }
 
             SwitchTo(MenuScreens.BuildLevelSelect(app, safeArea, page));
@@ -39,11 +45,13 @@ namespace DustBot
 
         public void ShowSettings()
         {
+            if (app.Audio != null) app.Audio.PlayMenuMusic();
             SwitchTo(MenuScreens.BuildSettings(app, safeArea));
         }
 
         public void ShowHowToPlay()
         {
+            if (app.Audio != null) app.Audio.PlayMenuMusic();
             SwitchTo(MenuScreens.BuildHowToPlay(app, safeArea));
         }
 
@@ -54,7 +62,19 @@ namespace DustBot
 
         public void ShowCosmetics(CosmeticCategory category, int page = 0)
         {
+            if (app.Audio != null) app.Audio.PlayMenuMusic();
             SwitchTo(MenuScreens.BuildCosmetics(app, safeArea, category, page));
+        }
+
+        public void ShowDeveloperPanel()
+        {
+            if (!LevelGenerationConfig.DeveloperToolsEnabled)
+            {
+                return;
+            }
+
+            if (app.Audio != null) app.Audio.PlayMenuMusic();
+            SwitchTo(MenuScreens.BuildDeveloperPanel(app, safeArea));
         }
 
         public void ShowGame(LevelDefinition level)
@@ -68,7 +88,15 @@ namespace DustBot
             UIFactory.Stretch(screen);
             GameScreen gameScreen = screen.AddComponent<GameScreen>();
             gameScreen.Initialize(app, level);
+            if (app.Audio != null) app.Audio.PlayGameplayMusic(level);
             SwitchTo(screen);
+        }
+
+        public void ShowMasterCleanLockedMessage()
+        {
+            ShowInfoModal(
+                "MASTER CLEAN LOCKED",
+                "Complete Level " + LevelManifest.MainJourneyLevelCount + " to unlock Master Clean.\n\nKeep cleaning!");
         }
 
         private void BuildCanvas()
@@ -169,7 +197,70 @@ namespace DustBot
                 Destroy(currentScreen);
             }
 
+            if (modalOverlay != null)
+            {
+                Destroy(modalOverlay);
+                modalOverlay = null;
+            }
+
             currentScreen = screen;
+        }
+
+        private void ShowInfoModal(string title, string body)
+        {
+            if (safeArea == null)
+            {
+                return;
+            }
+
+            if (modalOverlay != null)
+            {
+                Destroy(modalOverlay);
+            }
+
+            modalOverlay = UIFactory.CreateUIObject("Info Modal", safeArea);
+            UIFactory.Stretch(modalOverlay);
+            Image shade = modalOverlay.AddComponent<Image>();
+            shade.color = DustBotTheme.Overlay;
+
+            Image panel = UIFactory.CreatePanel("Modal Panel", modalOverlay.transform, DustBotTheme.Panel);
+            UIFactory.SetAnchors(panel.rectTransform, new Vector2(0.105f, 0.34f), new Vector2(0.895f, 0.66f), Vector2.zero, Vector2.zero);
+            Shadow shadow = panel.gameObject.AddComponent<Shadow>();
+            shadow.effectColor = new Color(0.03f, 0.07f, 0.06f, 0.32f);
+            shadow.effectDistance = new Vector2(0f, -8f);
+
+            Text titleText = UIFactory.CreateText(
+                "Modal Title",
+                panel.transform,
+                title,
+                38,
+                DustBotTheme.Ink);
+            titleText.fontStyle = FontStyle.Bold;
+            UIFactory.SetAnchors(titleText.rectTransform, new Vector2(0.08f, 0.66f), new Vector2(0.92f, 0.9f), Vector2.zero, Vector2.zero);
+
+            Text bodyText = UIFactory.CreateText(
+                "Modal Body",
+                panel.transform,
+                body,
+                27,
+                DustBotTheme.MutedInk);
+            UIFactory.SetAnchors(bodyText.rectTransform, new Vector2(0.08f, 0.27f), new Vector2(0.92f, 0.66f), Vector2.zero, Vector2.zero);
+
+            Button ok = UIFactory.CreateButton(
+                "Modal OK",
+                panel.transform,
+                "GOT IT",
+                delegate
+                {
+                    if (modalOverlay != null)
+                    {
+                        Destroy(modalOverlay);
+                        modalOverlay = null;
+                    }
+                },
+                DustBotTheme.MintDark,
+                28);
+            UIFactory.SetAnchors(ok.GetComponent<RectTransform>(), new Vector2(0.2f, 0.08f), new Vector2(0.8f, 0.24f), Vector2.zero, Vector2.zero);
         }
     }
 }

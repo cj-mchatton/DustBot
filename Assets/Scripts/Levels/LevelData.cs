@@ -36,6 +36,21 @@ namespace DustBot
         ChallengeRoute
     }
 
+    public enum DevMazeArchetype
+    {
+        Baseline,
+        DeadEndBranch,
+        MultiRoom,
+        DockReturn,
+        DustBunnyDetour,
+        OneWayCommitment,
+        StickyShortcut,
+        FragileCorridor,
+        Loop,
+        Chokepoint,
+        ExpertLarge
+    }
+
     public enum Direction
     {
         None,
@@ -55,7 +70,14 @@ namespace DustBot
         Sock,
         Cord,
         WetSpot,
-        Toy
+        Toy,
+        Sticky,
+        Fragile,
+        OneWayUp,
+        OneWayRight,
+        OneWayDown,
+        OneWayLeft,
+        Slippery
     }
 
     public enum CatBehavior
@@ -78,7 +100,94 @@ namespace DustBot
         ReturnedTooEarly,
         OutOfMoves,
         LoopDetected,
-        CatPounce
+        CatPounce,
+        FragileBreak
+    }
+
+    public static class CellContentUtility
+    {
+        public static bool IsWalkableFloor(CellContent content)
+        {
+            return content == CellContent.Empty ||
+                   content == CellContent.Start ||
+                   content == CellContent.Dock ||
+                   content == CellContent.Crumb ||
+                   content == CellContent.Sticky ||
+                   content == CellContent.Fragile ||
+                   content == CellContent.Slippery ||
+                   IsOneWay(content);
+        }
+
+        public static bool IsDustBotBlocker(CellContent content)
+        {
+            return content == CellContent.Wall ||
+                   content == CellContent.Toy ||
+                   content == CellContent.Sock ||
+                   content == CellContent.Cord ||
+                   content == CellContent.WetSpot;
+        }
+
+        public static bool IsCatBlocker(CellContent content)
+        {
+            return content == CellContent.Wall ||
+                   content == CellContent.Toy ||
+                   content == CellContent.Sock ||
+                   content == CellContent.Cord ||
+                   content == CellContent.WetSpot;
+        }
+
+        public static bool IsRouteModifier(CellContent content)
+        {
+            return content == CellContent.Sticky ||
+                   content == CellContent.Fragile ||
+                   content == CellContent.Slippery ||
+                   IsOneWay(content);
+        }
+
+        public static bool IsOneWay(CellContent content)
+        {
+            return content == CellContent.OneWayUp ||
+                   content == CellContent.OneWayRight ||
+                   content == CellContent.OneWayDown ||
+                   content == CellContent.OneWayLeft;
+        }
+
+        public static Direction OneWayDirection(CellContent content)
+        {
+            switch (content)
+            {
+                case CellContent.OneWayUp: return Direction.Up;
+                case CellContent.OneWayRight: return Direction.Right;
+                case CellContent.OneWayDown: return Direction.Down;
+                case CellContent.OneWayLeft: return Direction.Left;
+                default: return Direction.None;
+            }
+        }
+
+        public static bool AllowsDirection(CellContent fromContent, CellContent toContent, Direction direction)
+        {
+            if (direction == Direction.None)
+            {
+                return false;
+            }
+
+            if (IsOneWay(fromContent) && OneWayDirection(fromContent) != direction)
+            {
+                return false;
+            }
+
+            if (IsOneWay(toContent) && OneWayDirection(toContent) != direction)
+            {
+                return false;
+            }
+
+            return true;
+        }
+
+        public static int MoveCost(CellContent destinationContent)
+        {
+            return destinationContent == CellContent.Sticky ? 2 : 1;
+        }
     }
 
     [Serializable]
@@ -225,6 +334,7 @@ namespace DustBot
     {
         public string id;
         public GameMode mode;
+        public GenerationMode generationMode;
         public int levelNumber;
         public string seed;
         public int generationVersion;
@@ -238,6 +348,16 @@ namespace DustBot
         public bool hardPathLimit;
         public LevelArchetype archetype;
         public int engagementScore;
+        public int strategicDepthScore;
+        public int catPressureScore;
+        public bool largeMaze;
+        public bool advancedDevMaze;
+        public DevMazeArchetype devMazeArchetype;
+        public int mazeComplexityScore;
+        public string testArchetype = string.Empty;
+        public string validationResult = string.Empty;
+        public bool dailyChallengeStyle;
+        public bool masterCleanStyle;
         public string themeId = "CozyHome";
         public string mechanicSet = "DrawPath";
         public string objectiveSet = "CleanAndDock";
@@ -299,6 +419,7 @@ namespace DustBot
     {
         public int levelNumber;
         public string seed;
+        public GenerationMode generationMode;
         public int generationVersion;
         public DifficultyTier difficultyTier;
         public int boardWidth;
@@ -308,6 +429,18 @@ namespace DustBot
         public string themeId;
         public LevelArchetype archetype;
         public bool useDailyChallengeProfile;
+        public bool hasCatBehaviorOverride;
+        public CatBehavior catBehaviorOverride;
+        public bool useProceduralCatLayout;
+        public bool hasRouteModifierOverride;
+        public RouteModifierStyle routeModifierStyle;
+        public int routeModifierCountOverride;
+        public string testArchetype;
+        public bool dailyChallengeStyle;
+        public bool masterCleanStyle;
+        public bool useLargeMaze;
+        public bool useAdvancedDevMaze;
+        public DevMazeArchetype devMazeArchetype;
     }
 
     [Serializable]
@@ -323,13 +456,23 @@ namespace DustBot
         public int minimumTurns;
         public int minimumDetour;
         public int minimumEngagementScore;
+        public int minimumStrategicDepthScore;
+        public int minimumCatPressureScore;
         public int moveLimitSlack;
         public bool hardPathLimit;
         public int minimumCrumbSpread;
         public int minimumRouteDecisions;
         public int minimumTemptingBranches;
         public int minimumBonusDetour;
+        public int routeModifierCount;
         public CatBehavior catBehavior;
+        public RouteModifierStyle routeModifierStyle;
+        public bool forcedRouteModifierStyle;
+        public bool largeMaze;
+        public int minimumMazeComplexityScore;
+        public int minimumMazeBranches;
+        public int minimumMazeDeadEnds;
+        public int minimumMazeLoops;
     }
 
     [Serializable]
@@ -337,6 +480,9 @@ namespace DustBot
     {
         public string levelId;
         public GameMode mode;
+        public GenerationMode generationMode;
+        public bool dailyChallengeStyle;
+        public bool masterCleanStyle;
         public int levelNumber;
         public int stars;
         public int coinsEarned;

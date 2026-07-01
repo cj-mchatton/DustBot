@@ -4,6 +4,8 @@ namespace DustBot
     {
         None,
         Started,
+        Resumed,
+        Trimmed,
         Added,
         Backtracked,
         Invalid,

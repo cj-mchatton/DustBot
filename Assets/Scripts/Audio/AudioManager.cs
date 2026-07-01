@@ -5,6 +5,7 @@ namespace DustBot
     public sealed class AudioManager : MonoBehaviour
     {
         private const int SampleRate = 24000;
+        private const float BaseMusicVolume = 0.18f;
 
         private AudioSource effectsSource;
         private AudioSource musicSource;
@@ -19,8 +20,15 @@ namespace DustBot
         private AudioClip reward;
         private AudioClip catStep;
         private AudioClip catPounce;
+        private AudioClip menuMusic;
+        private AudioClip gameplayMusic;
+        private AudioClip dailyMusic;
+        private AudioClip catMusic;
+        private string currentMusicKey = string.Empty;
         private bool soundEnabled = true;
         private bool musicEnabled = true;
+        private float soundVolume = 1f;
+        private float musicVolume = 0.8f;
 
         public bool SoundEnabled
         {
@@ -35,6 +43,22 @@ namespace DustBot
             {
                 musicEnabled = value;
                 RefreshMusic();
+            }
+        }
+
+        public float SoundVolume
+        {
+            get { return soundVolume; }
+            set { soundVolume = Mathf.Clamp01(value); }
+        }
+
+        public float MusicVolume
+        {
+            get { return musicVolume; }
+            set
+            {
+                musicVolume = Mathf.Clamp01(value);
+                ApplyMusicVolume();
             }
         }
 
@@ -60,7 +84,7 @@ namespace DustBot
             musicSource.playOnAwake = false;
             musicSource.loop = true;
             musicSource.spatialBlend = 0f;
-            musicSource.volume = 0.14f;
+            musicSource.volume = BaseMusicVolume * musicVolume;
             musicSource.ignoreListenerPause = true;
             musicSource.priority = 96;
 
@@ -75,7 +99,35 @@ namespace DustBot
             reward = CreateArpeggio("Reward", new[] { 784f, 988f, 1175f }, 0.08f, 0.18f);
             catStep = CreateTone("Cat Step", 330f, 0.055f, 0.1f, 0.18f);
             catPounce = CreateDescendingTone("Cat Pounce", 520f, 230f, 0.18f, 0.17f);
-            musicSource.clip = CreateMusicLoop();
+            menuMusic = CreateMusicLoop(
+                "DustBot Menu Marshmallow March",
+                new[] { 523.25f, 659.25f, 783.99f, 659.25f, 587.33f, 698.46f, 880f, 698.46f },
+                10f,
+                2.15f,
+                0.18f,
+                0.75f);
+            gameplayMusic = CreateMusicLoop(
+                "DustBot Cozy Puzzle Hop",
+                new[] { 392f, 493.88f, 587.33f, 659.25f, 587.33f, 493.88f, 440f, 493.88f },
+                12f,
+                1.9f,
+                0.14f,
+                0.5f);
+            dailyMusic = CreateMusicLoop(
+                "DustBot Daily Bell Bounce",
+                new[] { 440f, 554.37f, 659.25f, 830.61f, 739.99f, 659.25f, 554.37f, 493.88f },
+                12f,
+                2.05f,
+                0.2f,
+                0.62f);
+            catMusic = CreateMusicLoop(
+                "DustBot Sneaky Cat Tiptoe",
+                new[] { 349.23f, 415.3f, 523.25f, 622.25f, 523.25f, 466.16f, 415.3f, 392f },
+                10f,
+                2.35f,
+                0.26f,
+                0.88f);
+            SwitchMusic("menu", menuMusic);
             RefreshMusic();
         }
 
@@ -89,6 +141,23 @@ namespace DustBot
         public void PlayHint() { Play(hint, 0.85f); }
         public void PlayReward() { Play(reward, 0.9f); }
         public void PlayCatStep(bool pounce) { Play(pounce ? catPounce : catStep, pounce ? 0.9f : 0.48f); }
+        public void PlayMenuMusic() { SwitchMusic("menu", menuMusic); }
+        public void PlayGameplayMusic(LevelDefinition level)
+        {
+            if (level != null && level.cat != null && level.cat.IsEnabled)
+            {
+                SwitchMusic("cat", catMusic);
+                return;
+            }
+
+            if (level != null && level.mode == GameMode.DailyChallenge)
+            {
+                SwitchMusic("daily", dailyMusic);
+                return;
+            }
+
+            SwitchMusic("gameplay", gameplayMusic);
+        }
 
         private void OnApplicationFocus(bool hasFocus)
         {
@@ -116,7 +185,7 @@ namespace DustBot
         {
             if (soundEnabled && effectsSource != null && clip != null)
             {
-                effectsSource.PlayOneShot(clip, volume);
+                effectsSource.PlayOneShot(clip, volume * soundVolume);
             }
         }
 
@@ -137,6 +206,32 @@ namespace DustBot
             else
             {
                 musicSource.Pause();
+            }
+        }
+
+        private void SwitchMusic(string key, AudioClip clip)
+        {
+            if (musicSource == null || clip == null || currentMusicKey == key)
+            {
+                return;
+            }
+
+            bool wasPlaying = musicSource.isPlaying;
+            currentMusicKey = key;
+            musicSource.clip = clip;
+            musicSource.time = 0f;
+            ApplyMusicVolume();
+            if (musicEnabled && (wasPlaying || !musicSource.isPlaying))
+            {
+                musicSource.Play();
+            }
+        }
+
+        private void ApplyMusicVolume()
+        {
+            if (musicSource != null)
+            {
+                musicSource.volume = BaseMusicVolume * musicVolume;
             }
         }
 
@@ -238,30 +333,48 @@ namespace DustBot
             return CreateClip(name, samples);
         }
 
-        private static AudioClip CreateMusicLoop()
+        private static AudioClip CreateMusicLoop(
+            string name,
+            float[] melody,
+            float duration,
+            float tempo,
+            float bellAmount,
+            float percussionAmount)
         {
-            const float duration = 8f;
             int sampleCount = Mathf.CeilToInt(duration * SampleRate);
             float[] samples = new float[sampleCount * 2];
-            float[] notes = { 130.81f, 164.81f, 196f, 164.81f, 146.83f, 174.61f, 220f, 174.61f };
             for (int i = 0; i < sampleCount; i++)
             {
                 float t = (float)i / SampleRate;
-                int noteIndex = Mathf.FloorToInt(t) % notes.Length;
-                float withinNote = t - Mathf.Floor(t);
-                float fade = Mathf.SmoothStep(0f, 1f, Mathf.Min(withinNote * 4f, (1f - withinNote) * 4f));
-                float root = notes[noteIndex];
-                float pad =
-                    Mathf.Sin(t * root * Mathf.PI * 2f) * 0.45f +
-                    Mathf.Sin(t * root * 1.5f * Mathf.PI * 2f) * 0.25f +
-                    Mathf.Sin(t * root * 2f * Mathf.PI * 2f) * 0.1f;
-                float shimmer = Mathf.Sin(t * 0.25f * Mathf.PI * 2f) * 0.08f;
-                float value = (pad * fade + shimmer) * 0.12f;
-                samples[i * 2] = value * 0.96f;
+                float beat = t * tempo;
+                int noteIndex = Mathf.FloorToInt(beat) % melody.Length;
+                float withinBeat = beat - Mathf.Floor(beat);
+                float root = melody[noteIndex];
+                float pluckEnvelope = Mathf.Exp(-withinBeat * 5.4f) * Mathf.Sin(Mathf.Clamp01(withinBeat * 3.5f) * Mathf.PI);
+                float marimba =
+                    Mathf.Sin(t * root * Mathf.PI * 2f) * 0.55f +
+                    Mathf.Sin(t * root * 2f * Mathf.PI * 2f) * 0.18f +
+                    Mathf.Sin(t * root * 3f * Mathf.PI * 2f) * 0.08f;
+                float bell =
+                    Mathf.Sin(t * root * 2f * Mathf.PI * 2f) *
+                    Mathf.Exp(-withinBeat * 3.2f) *
+                    bellAmount;
+                float bass =
+                    Mathf.Sin(t * (root * 0.25f) * Mathf.PI * 2f) *
+                    (0.12f + Mathf.Sin(t * 0.5f * Mathf.PI * 2f) * 0.025f);
+                float eighth = (beat * 2f) - Mathf.Floor(beat * 2f);
+                float tick =
+                    Mathf.Sin(t * 1450f * Mathf.PI * 2f) *
+                    Mathf.Exp(-eighth * 34f) *
+                    0.025f *
+                    percussionAmount;
+                float edgeFade = Mathf.Clamp01(Mathf.Min(i, sampleCount - 1 - i) / (SampleRate * 0.035f));
+                float value = (marimba * pluckEnvelope * 0.18f + bell * 0.06f + bass + tick) * edgeFade;
+                samples[i * 2] = value * 0.94f;
                 samples[i * 2 + 1] = value;
             }
 
-            AudioClip clip = AudioClip.Create("Cozy Cleaning Loop", sampleCount, 2, SampleRate, false);
+            AudioClip clip = AudioClip.Create(name, sampleCount, 2, SampleRate, false);
             clip.SetData(samples, 0);
             return clip;
         }

@@ -62,7 +62,7 @@ namespace DustBot
                         Path(0, 0, 1, 0, 2, 0, 3, 0, 3, 1, 3, 2, 4, 2),
                         Indices(2, 5), Cells(2, 1, CellContent.Sock, 4, 1, CellContent.Wall), -1, 0);
                 case 12:
-                    return Create(12, 5, 4, "Undo restores the previous path segment.",
+                    return Create(12, 5, 4, "Drag backward or restart from an earlier route tile to redraw.",
                         Path(0, 3, 1, 3, 1, 2, 2, 2, 3, 2, 3, 1, 4, 1),
                         Indices(2, 4), Cells(2, 3, CellContent.Wall, 2, 1, CellContent.Cord));
                 case 13:

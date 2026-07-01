@@ -16,7 +16,6 @@ namespace DustBot
         private Text statusText;
         private Text coinText;
         private Button playButton;
-        private Button undoButton;
         private Button resetButton;
         private Button hintButton;
         private Coroutine simulation;
@@ -85,7 +84,28 @@ namespace DustBot
                 string.Empty,
                 24,
                 DustBotTheme.MintDark);
-            UIFactory.SetAnchors(coinText.rectTransform, new Vector2(0.78f, 0.92f), new Vector2(0.97f, 0.975f), Vector2.zero, Vector2.zero);
+            UIFactory.SetAnchors(
+                coinText.rectTransform,
+                LevelGenerationConfig.DeveloperToolsEnabled ? new Vector2(0.71f, 0.92f) : new Vector2(0.78f, 0.92f),
+                LevelGenerationConfig.DeveloperToolsEnabled ? new Vector2(0.86f, 0.975f) : new Vector2(0.97f, 0.975f),
+                Vector2.zero,
+                Vector2.zero);
+            if (LevelGenerationConfig.DeveloperToolsEnabled)
+            {
+                Button developer = UIFactory.CreateButton(
+                    "Developer Panel",
+                    transform,
+                    "DEV",
+                    app.UI.ShowDeveloperPanel,
+                    DustBotTheme.Coral,
+                    18);
+                UIFactory.SetAnchors(
+                    developer.GetComponent<RectTransform>(),
+                    new Vector2(0.87f, 0.925f),
+                    new Vector2(0.97f, 0.972f),
+                    Vector2.zero,
+                    Vector2.zero);
+            }
 
             Text tutorial = UIFactory.CreateText(
                 "Tutorial",
@@ -104,8 +124,10 @@ namespace DustBot
             UIFactory.SetAnchors(statusText.rectTransform, new Vector2(0.06f, 0.755f), new Vector2(0.94f, 0.82f), Vector2.zero, Vector2.zero);
 
             float boardWidth = 920f;
-            float boardHeight = boardWidth * level.height / level.width;
-            if (boardHeight > 970f)
+            float boardHeight = level.largeMaze
+                ? 970f
+                : boardWidth * level.height / level.width;
+            if (!level.largeMaze && boardHeight > 970f)
             {
                 boardHeight = 970f;
                 boardWidth = boardHeight * level.width / level.height;
@@ -125,10 +147,29 @@ namespace DustBot
             boardRim.effectColor = new Color(DustBotTheme.MintDark.r, DustBotTheme.MintDark.g, DustBotTheme.MintDark.b, 0.18f);
             boardRim.effectDistance = new Vector2(3f, -3f);
 
-            GameObject boardObject = UIFactory.CreateUIObject("Board", boardFrame.transform);
-            RectTransform boardRect = UIFactory.Stretch(boardObject);
-            boardRect.offsetMin = Vector2.one * 15f;
-            boardRect.offsetMax = Vector2.one * -15f;
+            GameObject viewportObject = UIFactory.CreateUIObject("Board Viewport", boardFrame.transform);
+            RectTransform viewportRect = UIFactory.Stretch(viewportObject);
+            viewportRect.offsetMin = Vector2.one * 15f;
+            viewportRect.offsetMax = Vector2.one * -15f;
+            viewportObject.AddComponent<RectMask2D>();
+
+            GameObject boardObject = UIFactory.CreateUIObject("Board", viewportObject.transform);
+            RectTransform boardRect = boardObject.GetComponent<RectTransform>();
+            boardRect.anchorMin = new Vector2(0.5f, 0.5f);
+            boardRect.anchorMax = new Vector2(0.5f, 0.5f);
+            boardRect.pivot = new Vector2(0.5f, 0.5f);
+            boardRect.anchoredPosition = Vector2.zero;
+            float viewportWidth = boardWidth;
+            float viewportHeight = boardHeight;
+            float fitCell = Mathf.Min(
+                viewportWidth / level.width,
+                viewportHeight / level.height);
+            float cellSize = level.largeMaze
+                ? Mathf.Max(58f, fitCell)
+                : fitCell;
+            boardRect.sizeDelta = new Vector2(
+                cellSize * level.width,
+                cellSize * level.height);
             board = boardObject.AddComponent<GameBoardView>();
             board.Initialize(
                 level,
@@ -136,32 +177,87 @@ namespace DustBot
                 input,
                 app.Cosmetics,
                 OnPathEdited,
-                OnCatSwipe);
+                OnCatSwipe,
+                viewportRect);
+
+            if (level.largeMaze)
+            {
+                CreateBoardCameraButton(
+                    boardFrame.transform,
+                    "Zoom Out",
+                    "−",
+                    new Vector2(1.005f, 0.91f),
+                    new Vector2(1.065f, 0.985f),
+                    delegate { board.AdjustZoom(-0.18f); });
+                CreateBoardCameraButton(
+                    boardFrame.transform,
+                    "Center Maze",
+                    "◎",
+                    new Vector2(1.005f, 0.825f),
+                    new Vector2(1.065f, 0.9f),
+                    board.ResetCamera);
+                CreateBoardCameraButton(
+                    boardFrame.transform,
+                    "Zoom In",
+                    "+",
+                    new Vector2(1.005f, 0.74f),
+                    new Vector2(1.065f, 0.815f),
+                    delegate { board.AdjustZoom(0.18f); });
+            }
+
+            Image actionBar = UIFactory.CreatePanel(
+                "Action Bar",
+                transform,
+                new Color(1f, 0.99f, 0.96f, 0.98f));
+            UIFactory.SetAnchors(
+                actionBar.rectTransform,
+                new Vector2(0.025f, 0.032f),
+                new Vector2(0.975f, 0.142f),
+                Vector2.zero,
+                Vector2.zero);
+            Shadow actionShadow = actionBar.gameObject.AddComponent<Shadow>();
+            actionShadow.effectColor = new Color(0.08f, 0.14f, 0.11f, 0.14f);
+            actionShadow.effectDistance = new Vector2(0f, -5f);
+            Outline actionRim = actionBar.gameObject.AddComponent<Outline>();
+            actionRim.effectColor = new Color(
+                DustBotTheme.MintDark.r,
+                DustBotTheme.MintDark.g,
+                DustBotTheme.MintDark.b,
+                0.12f);
+            actionRim.effectDistance = new Vector2(2f, -2f);
 
             playButton = CreateBottomButton(
+                actionBar.transform,
                 session.HasCat ? "SWIPE TO MOVE" : "PLAY",
                 session.HasCat ? null : (UnityEngine.Events.UnityAction)OnPlay,
                 DustBotTheme.Mint,
-                0.035f,
-                session.HasCat ? 0.585f : 0.37f,
-                session.HasCat ? 25 : 31);
-            undoButton = CreateBottomButton("UNDO", OnUndo, DustBotTheme.Blue, 0.39f, 0.585f, 25);
+                0.012f,
+                0.545f,
+                session.HasCat ? 25 : 32);
             resetButton = CreateBottomButton(
+                actionBar.transform,
                 session.HasCat ? "RESTART" : "RESET",
                 OnReset,
-                DustBotTheme.MutedInk,
-                session.HasCat ? 0.605f : 0.605f,
-                session.HasCat ? 0.79f : 0.79f,
-                25);
-            hintButton = CreateBottomButton(HintButtonLabel(), OnHint, DustBotTheme.Coral, 0.81f, 0.965f, 25);
+                DustBotTheme.Blue,
+                0.565f,
+                0.76f,
+                24);
+            hintButton = CreateBottomButton(
+                actionBar.transform,
+                "HINT",
+                OnHint,
+                DustBotTheme.Coral,
+                0.78f,
+                0.988f,
+                24);
             if (session.HasCat)
             {
                 playButton.interactable = false;
-                undoButton.gameObject.SetActive(false);
             }
         }
 
         private Button CreateBottomButton(
+            Transform parent,
             string label,
             UnityEngine.Events.UnityAction action,
             Color color,
@@ -169,14 +265,38 @@ namespace DustBot
             float right,
             int fontSize)
         {
-            Button button = UIFactory.CreateButton(label, transform, label, action, color, fontSize);
+            Button button = UIFactory.CreateButton(label, parent, label, action, color, fontSize);
             UIFactory.SetAnchors(
                 button.GetComponent<RectTransform>(),
-                new Vector2(left, 0.045f),
-                new Vector2(right, 0.125f),
+                new Vector2(left, 0.12f),
+                new Vector2(right, 0.88f),
                 Vector2.zero,
                 Vector2.zero);
             return button;
+        }
+
+        private static void CreateBoardCameraButton(
+            Transform parent,
+            string name,
+            string label,
+            Vector2 anchorMin,
+            Vector2 anchorMax,
+            UnityEngine.Events.UnityAction action)
+        {
+            Button button = UIFactory.CreateButton(
+                name,
+                parent,
+                label,
+                action,
+                new Color(0.12f, 0.2f, 0.18f, 0.88f),
+                26);
+            UIFactory.SetAnchors(
+                button.GetComponent<RectTransform>(),
+                anchorMin,
+                anchorMax,
+                Vector2.zero,
+                Vector2.zero);
+            button.transform.SetAsLastSibling();
         }
 
         private void OnPathEdited(PathEditResult result, GridPosition position)
@@ -191,7 +311,7 @@ namespace DustBot
             {
                 app.Haptics.Error();
                 StartCoroutine(FlashStatus(
-                    "MAX PATH " + level.moveLimit + " — drag backward or Undo."));
+                    "MAX COST " + level.moveLimit + " — drag backward or trim the route."));
             }
             else
             {
@@ -303,15 +423,6 @@ namespace DustBot
             }
         }
 
-        private void OnUndo()
-        {
-            if (input.Undo())
-            {
-                board.RefreshAll();
-                UpdateHud();
-            }
-        }
-
         private void OnReset()
         {
             ResetAttempt(session.State == GameSessionState.Editing);
@@ -347,7 +458,32 @@ namespace DustBot
         private void OnHint()
         {
             GridPosition target;
-            bool routeNeedsHint = session.TryGetHintTarget(out target);
+            if (!session.TryGetHintTarget(out target))
+            {
+                StartCoroutine(FlashStatus("Route already matches the solution."));
+                return;
+            }
+
+            int cost = HintSystem.CostFor(level);
+            if (cost <= 0)
+            {
+                ApplyConfirmedHint();
+                return;
+            }
+
+            if (app.Economy.Coins < cost)
+            {
+                ShowHintNotice(
+                    "Not Enough Coins",
+                    "Not enough Dust Coins.\nA hint costs " + cost + " Dust Coins.");
+                return;
+            }
+
+            ShowHintConfirmation(cost);
+        }
+
+        private void ApplyConfirmedHint()
+        {
             bool applied = hints.TryUseHint(session, delegate(GridPosition position)
             {
                 app.Audio.PlayHint();
@@ -361,14 +497,141 @@ namespace DustBot
             if (!applied)
             {
                 StartCoroutine(FlashStatus(
-                    routeNeedsHint
-                        ? HintSystem.CostFor(level) == 0
-                            ? "This tutorial hint is free."
-                            : string.Format(
-                                "Hints cost {0} coins. Daily hints remove the no-hint bonus.",
-                                HintSystem.CostFor(level))
+                    app.Economy.Coins < HintSystem.CostFor(level)
+                        ? "Not enough Dust Coins."
                         : "Route already matches the solution."));
             }
+        }
+
+        private void ShowHintConfirmation(int cost)
+        {
+            CloseModal();
+            modal = UIFactory.CreateUIObject("Hint Confirmation", transform);
+            UIFactory.Stretch(modal);
+            Image shade = modal.AddComponent<Image>();
+            shade.color = DustBotTheme.Overlay;
+
+            Image panel = UIFactory.CreatePanel("Panel", modal.transform, DustBotTheme.Panel);
+            UIFactory.SetAnchors(
+                panel.rectTransform,
+                new Vector2(0.1f, 0.34f),
+                new Vector2(0.9f, 0.66f),
+                Vector2.zero,
+                Vector2.zero);
+            panel.rectTransform.localScale = Vector3.one * 0.9f;
+
+            Text heading = UIFactory.CreateText(
+                "Heading",
+                panel.transform,
+                "Use Hint?",
+                44,
+                DustBotTheme.MintDark);
+            UIFactory.SetAnchors(
+                heading.rectTransform,
+                new Vector2(0.08f, 0.68f),
+                new Vector2(0.92f, 0.92f),
+                Vector2.zero,
+                Vector2.zero);
+            Text body = UIFactory.CreateText(
+                "Details",
+                panel.transform,
+                "Spend " + cost + " Dust Coins for a hint?",
+                29,
+                DustBotTheme.Ink);
+            UIFactory.SetAnchors(
+                body.rectTransform,
+                new Vector2(0.08f, 0.4f),
+                new Vector2(0.92f, 0.69f),
+                Vector2.zero,
+                Vector2.zero);
+
+            Button cancel = UIFactory.CreateButton(
+                "Cancel",
+                panel.transform,
+                "CANCEL",
+                CloseModal,
+                DustBotTheme.MutedInk,
+                27);
+            UIFactory.SetAnchors(
+                cancel.GetComponent<RectTransform>(),
+                new Vector2(0.08f, 0.1f),
+                new Vector2(0.46f, 0.34f),
+                Vector2.zero,
+                Vector2.zero);
+            Button confirm = UIFactory.CreateButton(
+                "Confirm Hint",
+                panel.transform,
+                "USE HINT",
+                delegate
+                {
+                    CloseModal();
+                    ApplyConfirmedHint();
+                },
+                DustBotTheme.Coral,
+                27);
+            UIFactory.SetAnchors(
+                confirm.GetComponent<RectTransform>(),
+                new Vector2(0.54f, 0.1f),
+                new Vector2(0.92f, 0.34f),
+                Vector2.zero,
+                Vector2.zero);
+            StartCoroutine(AnimateModalIn(panel.rectTransform));
+        }
+
+        private void ShowHintNotice(string title, string details)
+        {
+            CloseModal();
+            modal = UIFactory.CreateUIObject("Hint Notice", transform);
+            UIFactory.Stretch(modal);
+            Image shade = modal.AddComponent<Image>();
+            shade.color = DustBotTheme.Overlay;
+
+            Image panel = UIFactory.CreatePanel("Panel", modal.transform, DustBotTheme.Panel);
+            UIFactory.SetAnchors(
+                panel.rectTransform,
+                new Vector2(0.1f, 0.35f),
+                new Vector2(0.9f, 0.65f),
+                Vector2.zero,
+                Vector2.zero);
+            panel.rectTransform.localScale = Vector3.one * 0.9f;
+            Text heading = UIFactory.CreateText(
+                "Heading",
+                panel.transform,
+                title,
+                42,
+                DustBotTheme.Coral);
+            UIFactory.SetAnchors(
+                heading.rectTransform,
+                new Vector2(0.08f, 0.68f),
+                new Vector2(0.92f, 0.92f),
+                Vector2.zero,
+                Vector2.zero);
+            Text body = UIFactory.CreateText(
+                "Details",
+                panel.transform,
+                details,
+                28,
+                DustBotTheme.Ink);
+            UIFactory.SetAnchors(
+                body.rectTransform,
+                new Vector2(0.08f, 0.38f),
+                new Vector2(0.92f, 0.68f),
+                Vector2.zero,
+                Vector2.zero);
+            Button okay = UIFactory.CreateButton(
+                "Okay",
+                panel.transform,
+                "OK",
+                CloseModal,
+                DustBotTheme.Mint,
+                29);
+            UIFactory.SetAnchors(
+                okay.GetComponent<RectTransform>(),
+                new Vector2(0.22f, 0.1f),
+                new Vector2(0.78f, 0.34f),
+                Vector2.zero,
+                Vector2.zero);
+            StartCoroutine(AnimateModalIn(panel.rectTransform));
         }
 
         private void OnSimulationStep(StepOutcome outcome)
@@ -527,6 +790,20 @@ namespace DustBot
 
         private void OnNext()
         {
+            if (level.mode == GameMode.MainJourney &&
+                level.generationMode != GenerationMode.ProductionCampaign)
+            {
+                if (level.levelNumber < app.Levels.CampaignLevelCount)
+                {
+                    app.StartMainLevel(level.levelNumber + 1);
+                }
+                else
+                {
+                    app.UI.ShowDeveloperPanel();
+                }
+                return;
+            }
+
             switch (level.mode)
             {
                 case GameMode.MainJourney:
@@ -566,7 +843,6 @@ namespace DustBot
             }
 
             playButton.interactable = editing;
-            undoButton.interactable = editing && session.CanUndo;
             hintButton.interactable = editing;
             resetButton.interactable = true;
             UIFactory.GetButtonText(resetButton).text = editing ? "RESET" : "EDIT";
@@ -583,13 +859,15 @@ namespace DustBot
                 string limit = level.hardPathLimit
                     ? "  •  MAX " + level.moveLimit
                     : string.Empty;
+                string moveLabel = HasCostPressure(level) ? "COST" : "MOVES";
                 string perfectState = session.CanStillEarnThreeStars
                     ? "3★ CLEAN AVAILABLE"
                     : "REPLAY FOR 3★";
                 statusText.text = string.Format(
-                    "CRUMBS {0}{1}\nMOVES {2}  •  IDEAL {3}{4}  •  {5}",
+                    "CRUMBS {0}{1}\n{2} {3}  •  IDEAL {4}{5}  •  {6}",
                     session.CrumbsRemaining,
                     bonusState,
+                    moveLabel,
                     session.Moves,
                     level.threeStarMoveTarget,
                     limit,
@@ -602,16 +880,23 @@ namespace DustBot
             }
 
             int displayedMoves = session.State == GameSessionState.Editing
-                ? Mathf.Max(0, session.CurrentPathCells.Count - 1)
+                ? session.CurrentPathMoveCost
                 : session.Moves;
+            string metricLabel = HasCostPressure(level) ? "COST" : "PATH";
+            string stickyDelta = session.State == GameSessionState.Editing &&
+                                 session.CurrentPathMoveCost > session.CurrentPathLength
+                ? "  •  STICKY +" + (session.CurrentPathMoveCost - session.CurrentPathLength)
+                : string.Empty;
             string moveText = level.hardPathLimit
                 ? string.Format(
-                    "PATH {0}  •  PERFECT {1}  •  MAX {2}",
+                    "{0} {1}  •  PERFECT {2}  •  MAX {3}",
+                    metricLabel,
                     displayedMoves,
                     level.threeStarMoveTarget,
                     level.moveLimit)
                 : string.Format(
-                    "PATH {0}  •  PERFECT {1}  •  2★ {2}",
+                    "{0} {1}  •  PERFECT {2}  •  2★ {3}",
+                    metricLabel,
                     displayedMoves,
                     level.threeStarMoveTarget,
                     level.twoStarMoveTarget);
@@ -636,12 +921,13 @@ namespace DustBot
                 ? "PERFECT CLEAN AVAILABLE"
                 : "REPLAY FOR PERFECT CLEAN";
             statusText.text = string.Format(
-                "CRUMBS {0}{1}{2}\n{3}  •  {4}",
+                "CRUMBS {0}{1}{2}{3}\n{4}  •  {5}",
                 session.State == GameSessionState.Editing
                     ? session.PlannedCrumbsRemaining
                     : session.CrumbsRemaining,
                 bonus,
                 catStatus,
+                stickyDelta,
                 moveText,
                 perfect);
             statusText.color = catDanger
@@ -650,10 +936,6 @@ namespace DustBot
                     ? DustBotTheme.Ink
                     : DustBotTheme.Warning;
             coinText.text = string.Format("{0}\nCOINS", app.Economy.Coins);
-            if (session.State == GameSessionState.Editing)
-            {
-                undoButton.interactable = session.CanUndo;
-            }
         }
 
         private IEnumerator FlashStatus(string message)
@@ -697,6 +979,16 @@ namespace DustBot
 
         private static string LevelTitle(LevelDefinition definition)
         {
+            if (definition.generationMode != GenerationMode.ProductionCampaign)
+            {
+                if (definition.dailyChallengeStyle) return "DEV DAILY CHALLENGE";
+                if (definition.masterCleanStyle) return "DEV MASTER CLEAN";
+                if (definition.generationMode == GenerationMode.MazeTesting)
+                    return "MAZE TEST " + definition.levelNumber;
+                string prefix = definition.cat != null && definition.cat.IsEnabled ? "CAT TEST" : "DEV LEVEL";
+                return prefix + " " + definition.levelNumber;
+            }
+
             if (definition.cat != null && definition.cat.IsEnabled)
             {
                 switch (definition.mode)
@@ -724,32 +1016,140 @@ namespace DustBot
                 return definition.tutorialMessage;
             }
 
+            if (definition.generationMode != GenerationMode.ProductionCampaign &&
+                !string.IsNullOrEmpty(definition.testArchetype))
+            {
+                return definition.testArchetype.ToUpperInvariant() + " • " +
+                       (definition.advancedDevMaze
+                           ? "Pinch to zoom, drag open board space to pan, and plan every branch before drawing. "
+                           : string.Empty) +
+                       (definition.cat != null && definition.cat.IsEnabled
+                           ? "Turn-based cat pressure and route safety."
+                           : "Draw, clean, dock, and verify the intended mechanic affects the solve.") +
+                       ObstacleBriefing(definition);
+            }
+
             if (definition.mode == GameMode.DailyChallenge)
             {
                 return string.Format(
-                    "SPECIAL {0}{1} • Plan every turn, collect the Dust Bunny, and avoid hints for a perfect daily clean.",
+                    "SPECIAL {0}{1}{2} • Plan every turn, collect the Dust Bunny, and avoid hints for a perfect daily clean.",
                     ArchetypeLabel(definition.archetype),
                     definition.cat != null && definition.cat.IsEnabled
                         ? " • " + CatLabel(definition.cat.behavior)
-                        : string.Empty);
+                        : string.Empty,
+                    ObstacleBriefing(definition));
             }
 
             if (definition.cat != null && definition.cat.IsEnabled)
             {
-                return "SWIPE ONE TILE • Cat moves twice, horizontal first. Clean every crumb, use furniture, then dock.";
+                return "SWIPE ONE TILE • Cat moves twice, horizontal first. Paw marks preview danger. Use furniture, clean every crumb, then dock." +
+                       ObstacleBriefing(definition);
             }
 
             return string.Format(
-                "{0}{1} • Drag through every crumb, then finish at the dock.",
+                "{0}{1}{2} • Drag through every crumb, watch route cost, then finish at the dock.",
                 ArchetypeLabel(definition.archetype),
                 definition.cat != null && definition.cat.IsEnabled
                     ? " • " + CatLabel(definition.cat.behavior)
-                    : string.Empty);
+                    : string.Empty,
+                ObstacleBriefing(definition));
+        }
+
+        private static string ObstacleBriefing(LevelDefinition definition)
+        {
+            if (definition == null || definition.cells == null)
+            {
+                return string.Empty;
+            }
+
+            bool sticky = HasContent(definition, CellContent.Sticky);
+            bool fragile = HasContent(definition, CellContent.Fragile);
+            bool slippery = HasContent(definition, CellContent.Slippery);
+            bool oneWay = HasOneWay(definition);
+            if (!sticky && !fragile && !slippery && !oneWay)
+            {
+                return string.Empty;
+            }
+
+            string text = " • ";
+            bool wrote = false;
+            if (sticky)
+            {
+                text += "Sticky costs +1";
+                wrote = true;
+            }
+
+            if (oneWay)
+            {
+                text += wrote ? "; arrows force direction" : "Arrows force direction";
+                wrote = true;
+            }
+
+            if (fragile)
+            {
+                text += wrote ? "; diamonds crack once" : "Diamonds crack once";
+                wrote = true;
+            }
+
+            if (slippery)
+            {
+                text += wrote ? "; waves keep momentum straight" : "Waves keep momentum straight";
+            }
+
+            return text;
         }
 
         private static string CatLabel(CatBehavior behavior)
         {
             return "CURIOUS CAT: TWO MOVES, HORIZONTAL FIRST";
+        }
+
+        private static bool HasCostPressure(LevelDefinition definition)
+        {
+            return definition != null &&
+                   (definition.hardPathLimit ||
+                    HasContent(definition, CellContent.Sticky) ||
+                    HasContent(definition, CellContent.Fragile) ||
+                    HasContent(definition, CellContent.Slippery) ||
+                    HasOneWay(definition));
+        }
+
+        private static bool HasContent(LevelDefinition definition, CellContent content)
+        {
+            if (definition == null || definition.cells == null)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < definition.cells.Count; i++)
+            {
+                if (definition.cells[i] != null &&
+                    definition.cells[i].content == content)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static bool HasOneWay(LevelDefinition definition)
+        {
+            if (definition == null || definition.cells == null)
+            {
+                return false;
+            }
+
+            for (int i = 0; i < definition.cells.Count; i++)
+            {
+                if (definition.cells[i] != null &&
+                    CellContentUtility.IsOneWay(definition.cells[i].content))
+                {
+                    return true;
+                }
+            }
+
+            return false;
         }
 
         private static string ArchetypeLabel(LevelArchetype archetype)
@@ -778,9 +1178,10 @@ namespace DustBot
                 case FailureReason.WallBump: return "Bonk. Furniture remains undefeated.";
                 case FailureReason.LeftBoard: return "DustBot left the room. Keep the route inside the grid.";
                 case FailureReason.ReturnedTooEarly: return "Back at the dock, but crumbs are still plotting.";
-                case FailureReason.OutOfMoves: return "Maximum path length reached. Redraw a shorter, cleaner route.";
+                case FailureReason.OutOfMoves: return "Maximum route cost reached. Avoid sticky detours or redraw a cleaner route.";
                 case FailureReason.LoopDetected: return "DustBot found an infinite cleaning career.";
                 case FailureReason.CatPounce: return "Cat pounce! Use the paw preview and furniture to keep whiskers at a safe distance.";
+                case FailureReason.FragileBreak: return "Fragile tile cracked. Cross each diamond tile only once.";
                 default: return "DustBot got stuck. Redraw the next part of the route.";
             }
         }
@@ -790,12 +1191,6 @@ namespace DustBot
             if (stars == 3) return "★  ★  ★";
             if (stars == 2) return "★  ★  ☆";
             return "★  ☆  ☆";
-        }
-
-        private string HintButtonLabel()
-        {
-            int cost = HintSystem.CostFor(level);
-            return cost == 0 ? "FREE HINT" : "HINT " + cost;
         }
 
         private static string RewardDetail(LevelResult result)
@@ -840,7 +1235,10 @@ namespace DustBot
 
         private string NextLevelText()
         {
-            if (level.mode == GameMode.MainJourney && level.levelNumber < LevelManifest.MainJourneyLevelCount)
+            int campaignCount = level.generationMode == GenerationMode.ProductionCampaign
+                ? LevelManifest.MainJourneyLevelCount
+                : app.Levels.CampaignLevelCount;
+            if (level.mode == GameMode.MainJourney && level.levelNumber < campaignCount)
             {
                 return string.Format("\nLevel {0} is ready.", level.levelNumber + 1);
             }
@@ -850,12 +1248,23 @@ namespace DustBot
                 return "\nDaily challenge complete.";
             }
 
+            if (level.generationMode != GenerationMode.ProductionCampaign)
+            {
+                return "\nTesting playlist complete.";
+            }
+
             return "\nThe next room is ready.";
         }
 
         private string NextButtonLabel()
         {
             if (level.mode == GameMode.DailyChallenge)
+            {
+                return "DONE";
+            }
+
+            if (level.generationMode != GenerationMode.ProductionCampaign &&
+                level.levelNumber >= app.Levels.CampaignLevelCount)
             {
                 return "DONE";
             }
@@ -905,6 +1314,15 @@ namespace DustBot
 
             board.RefreshAll();
             UpdateHud();
+        }
+
+        public void PrepareLargeMazeScreenshot(int routeSteps)
+        {
+            PrepareForStoreScreenshot(routeSteps);
+            if (level.largeMaze && board != null)
+            {
+                board.AdjustZoom(-1f);
+            }
         }
 
         private void OnApplicationPause(bool pauseStatus)

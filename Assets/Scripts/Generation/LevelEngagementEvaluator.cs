@@ -16,6 +16,16 @@ namespace DustBot
         public int temptingBranches;
         public int bonusDetourCost;
         public int catPressure;
+        public int catPressureScore;
+        public int routeModifierCount;
+        public int strategicDepthScore;
+        public int chokepoints;
+        public int obstacleDecisionScore;
+        public int stickyCost;
+        public int oneWayCommitments;
+        public int fragileCommitments;
+        public int possibleRoutes;
+        public int pathCostPressure;
         public bool tooTrivial;
         public bool tooDense;
     }
@@ -42,13 +52,46 @@ namespace DustBot
             int crumbSpread = CalculateCrumbSpread(level);
             int orderComplexity = CalculateOrderComplexity(level, route);
             int bonusDetourCost = CalculateBonusDetourCost(level, route);
+            int routeModifierCount = CountRouteModifiers(level, routeSet);
+            int routeMoveCost = CalculateRouteMoveCost(level, route);
+            int stickyCost = Math.Max(0, routeMoveCost - Math.Max(0, route.Count - 1));
+            int oneWayCommitments = CountRouteContent(
+                level,
+                routeSet,
+                CellContentUtility.IsOneWay);
+            int fragileCommitments = CountRouteContent(
+                level,
+                routeSet,
+                delegate(CellContent content) { return content == CellContent.Fragile; });
+            int chokepoints = CountChokepoints(level, route, routeSet);
+            int possibleRoutes = Math.Min(
+                4,
+                1 + Math.Min(3, decisions / 2) + Math.Min(2, temptingBranches / 2));
+            int pathCostPressure = CalculatePathCostPressure(
+                level,
+                stickyCost,
+                routeMoveCost);
+            int obstacleDecisionScore =
+                Math.Min(12, stickyCost * 2) +
+                Math.Min(10, oneWayCommitments * 3) +
+                Math.Min(8, fragileCommitments * 2) +
+                Math.Min(8, routeModifierCount * 2) +
+                Math.Min(6, pathCostPressure);
             int catPressure = 0;
+            int catPressureScore = 0;
             if (level.cat != null && level.cat.IsEnabled)
             {
-                CatRoutePreview catPreview = CatObstacleSimulator.SimulateRoute(level, route);
-                catPressure = catPreview.closestDistance < 0
-                    ? 0
-                    : Math.Max(0, 5 - catPreview.closestDistance);
+                CatRelevanceReport relevance =
+                    CatObstacleSimulator.AnalyzeRelevance(level, route);
+                catPressureScore = relevance.IsStrategicallyActive
+                    ? Math.Min(
+                        12,
+                        relevance.pressureTurns +
+                        Math.Max(0, 5 - relevance.closestDistance) +
+                        Math.Min(3, relevance.reachableRouteTiles / 2) +
+                        Math.Min(3, relevance.uniqueVisitedTiles / 2))
+                    : 0;
+                catPressure = Math.Min(6, catPressureScore);
             }
             int nearbyBlockers = 0;
             int nearbyHazards = 0;
@@ -74,6 +117,18 @@ namespace DustBot
                 }
             }
 
+            int strategicDepthScore =
+                Math.Min(12, decisions * 2) +
+                Math.Min(10, temptingBranches * 2) +
+                Math.Min(10, chokepoints * 2) +
+                Math.Min(10, orderComplexity * 2) +
+                Math.Min(12, obstacleDecisionScore) +
+                Math.Min(8, bonusDetourCost * 2) +
+                Math.Min(10, pathCostPressure * 2) +
+                Math.Min(12, catPressureScore) +
+                Math.Min(8, possibleRoutes * 2) +
+                Math.Min(6, detour);
+
             int score =
                 Math.Min(8, (route.Count - 1) / 3) +
                 turns * 2 +
@@ -86,28 +141,43 @@ namespace DustBot
                 Math.Min(7, orderComplexity) +
                 Math.Min(6, temptingBranches * 2) +
                 Math.Min(6, bonusDetourCost * 2) +
+                Math.Min(6, routeModifierCount * 2) +
                 Math.Min(8, catPressure * 2) +
+                Math.Min(14, strategicDepthScore / 3) +
                 (level.hardPathLimit ? 4 : 0) +
                 (level.objectives.collectBonus ? 2 : 0);
 
+            bool strongStrategicPressure =
+                strategicDepthScore >= 35 ||
+                catPressureScore >= 5 ||
+                obstacleDecisionScore >= 10;
             bool tooTrivial =
                 (level.levelNumber > 7 && turns < 2) ||
                 (level.levelNumber > 10 &&
                  decisions == 0 &&
-                 nearbyBlockers + nearbyHazards == 0 &&
+                 nearbyBlockers + nearbyHazards + routeModifierCount == 0 &&
                  !level.hardPathLimit) ||
                 (level.levelNumber > 15 &&
+                 !strongStrategicPressure &&
                  ((route.Count - 1 < 9) ||
                   level.Count(CellContent.Crumb) < 2 ||
                   crumbSpread < 2)) ||
                 (level.levelNumber > 25 &&
+                 !strongStrategicPressure &&
                  ((turns < 4 && detour < 3) ||
                   nearbyBlockers + nearbyHazards < 2 ||
                   (temptingBranches == 0 &&
                    nearbyHazards == 0 &&
+                   routeModifierCount == 0 &&
                    catPressure == 0 &&
-                   !level.hardPathLimit)));
-            bool tooDense = blockingCells > level.width * level.height / 2;
+                   !level.hardPathLimit))) ||
+                (level.levelNumber > 12 &&
+                 strategicDepthScore < 18) ||
+                (level.levelNumber > 20 &&
+                 strategicDepthScore < 26);
+            bool tooDense = level.largeMaze
+                ? blockingCells > level.width * level.height * 72 / 100
+                : blockingCells > level.width * level.height / 2;
 
             return new LevelEngagementReport
             {
@@ -122,6 +192,16 @@ namespace DustBot
                 temptingBranches = temptingBranches,
                 bonusDetourCost = bonusDetourCost,
                 catPressure = catPressure,
+                catPressureScore = catPressureScore,
+                routeModifierCount = routeModifierCount,
+                strategicDepthScore = strategicDepthScore,
+                chokepoints = chokepoints,
+                obstacleDecisionScore = obstacleDecisionScore,
+                stickyCost = stickyCost,
+                oneWayCommitments = oneWayCommitments,
+                fragileCommitments = fragileCommitments,
+                possibleRoutes = possibleRoutes,
+                pathCostPressure = pathCostPressure,
                 tooTrivial = tooTrivial,
                 tooDense = tooDense
             };
@@ -136,14 +216,25 @@ namespace DustBot
             int effectiveDecisions =
                 report.routeDecisions +
                 Math.Min(3, report.nearbyBlockers + report.nearbyHazards) +
+                Math.Min(3, report.routeModifierCount) +
                 Math.Min(2, report.catPressure) +
                 (level.hardPathLimit ? 1 : 0) +
                 Math.Min(2, report.orderComplexity / 3);
             int effectiveTemptations =
                 report.temptingBranches +
                 Math.Min(2, report.nearbyHazards) +
+                Math.Min(2, report.routeModifierCount) +
                 (report.catPressure > 0 ? 1 : 0) +
                 (level.hardPathLimit ? 1 : 0);
+            int requiredStrategicDepth = settings.minimumStrategicDepthScore > 0
+                ? settings.minimumStrategicDepthScore
+                : Math.Max(0, settings.minimumEngagementScore / 2);
+            if (report.score >= settings.minimumEngagementScore + 18 ||
+                (report.chokepoints >= 5 && report.obstacleDecisionScore >= 10))
+            {
+                requiredStrategicDepth = Math.Max(0, requiredStrategicDepth - 4);
+            }
+
             if (report.tooDense ||
                 report.turns < settings.minimumTurns ||
                 report.endpointDetour < settings.minimumDetour ||
@@ -151,7 +242,22 @@ namespace DustBot
                 effectiveDecisions < settings.minimumRouteDecisions ||
                 effectiveTemptations < settings.minimumTemptingBranches ||
                 report.bonusDetourCost < settings.minimumBonusDetour ||
+                report.strategicDepthScore < requiredStrategicDepth ||
                 report.score < settings.minimumEngagementScore)
+            {
+                return false;
+            }
+
+            if (settings.routeModifierCount > 0 &&
+                report.routeModifierCount < Math.Min(settings.routeModifierCount, 2))
+            {
+                return false;
+            }
+
+            if (level.cat != null &&
+                level.cat.IsEnabled &&
+                settings.minimumCatPressureScore > 0 &&
+                report.catPressureScore < settings.minimumCatPressureScore)
             {
                 return false;
             }
@@ -349,6 +455,145 @@ namespace DustBot
             }
 
             return best;
+        }
+
+        private static int CountRouteModifiers(
+            LevelDefinition level,
+            HashSet<GridPosition> routeSet)
+        {
+            int count = 0;
+            for (int i = 0; i < level.cells.Count; i++)
+            {
+                if (routeSet.Contains(level.cells[i].position) &&
+                    CellContentUtility.IsRouteModifier(level.cells[i].content))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private static int CountRouteContent(
+            LevelDefinition level,
+            HashSet<GridPosition> routeSet,
+            Predicate<CellContent> predicate)
+        {
+            int count = 0;
+            for (int i = 0; i < level.cells.Count; i++)
+            {
+                if (routeSet.Contains(level.cells[i].position) &&
+                    predicate(level.cells[i].content))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private static int CountChokepoints(
+            LevelDefinition level,
+            List<GridPosition> route,
+            HashSet<GridPosition> routeSet)
+        {
+            int chokepoints = 0;
+            for (int i = 1; i < route.Count - 1; i++)
+            {
+                GridPosition position = route[i];
+                int walkableNeighbors = 0;
+                bool adjacentPressure = false;
+                for (int j = 0; j < Offsets.Length; j++)
+                {
+                    GridPosition neighbor = position + Offsets[j];
+                    if (!level.IsInside(neighbor))
+                    {
+                        adjacentPressure = true;
+                        continue;
+                    }
+
+                    CellContent content = level.GetContent(neighbor);
+                    if (CellContentUtility.IsWalkableFloor(content))
+                    {
+                        walkableNeighbors++;
+                    }
+                    else
+                    {
+                        adjacentPressure = true;
+                    }
+                }
+
+                CellContent routeContent = level.GetContent(position);
+                if ((walkableNeighbors <= 2 && adjacentPressure) ||
+                    CellContentUtility.IsRouteModifier(routeContent) ||
+                    HasAdjacentTemptation(level, position, routeSet))
+                {
+                    chokepoints++;
+                }
+            }
+
+            return chokepoints;
+        }
+
+        private static bool HasAdjacentTemptation(
+            LevelDefinition level,
+            GridPosition position,
+            HashSet<GridPosition> routeSet)
+        {
+            for (int i = 0; i < Offsets.Length; i++)
+            {
+                GridPosition neighbor = position + Offsets[i];
+                if (level.IsInside(neighbor) &&
+                    !routeSet.Contains(neighbor) &&
+                    level.GetContent(neighbor) == CellContent.Empty)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static int CalculateRouteMoveCost(
+            LevelDefinition level,
+            List<GridPosition> route)
+        {
+            int cost = 0;
+            for (int i = 1; i < route.Count; i++)
+            {
+                cost += CellContentUtility.MoveCost(level.GetContent(route[i]));
+            }
+
+            return cost;
+        }
+
+        private static int CalculatePathCostPressure(
+            LevelDefinition level,
+            int stickyCost,
+            int routeMoveCost)
+        {
+            int pressure = Math.Min(5, stickyCost);
+            if (level.hardPathLimit && level.moveLimit > 0)
+            {
+                pressure += Math.Max(1, 5 - Math.Max(0, level.moveLimit - routeMoveCost));
+            }
+
+            if (level.twoStarMoveTarget > 0)
+            {
+                pressure += Math.Max(0, 3 - Math.Max(0, level.twoStarMoveTarget - routeMoveCost));
+            }
+
+            if (level.objectives.bonusRequiredForThreeStars)
+            {
+                pressure += 2;
+            }
+
+            if (level.objectives.noHintStar)
+            {
+                pressure += 1;
+            }
+
+            return pressure;
         }
 
         private static bool IsAdjacentTo(

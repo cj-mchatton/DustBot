@@ -167,7 +167,12 @@ namespace DustBot
 
         public string ActiveFailureAnimationId
         {
-            get { return progression.Data.cosmetics.activeFailureAnimationId; }
+            get
+            {
+                return string.IsNullOrEmpty(progression.Data.cosmetics.activeFailureAnimationId)
+                    ? CosmeticCatalog.DefaultFailureAnimation
+                    : progression.Data.cosmetics.activeFailureAnimationId;
+            }
         }
 
         public string ActiveBotSkinId

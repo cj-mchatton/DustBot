@@ -17,6 +17,8 @@ namespace DustBot
         public AudioManager Audio { get; private set; }
         public HapticsManager Haptics { get; private set; }
         public UIManager UI { get; private set; }
+        public int CurrentCampaignLevel { get; private set; } = 1;
+        public LevelDefinition CurrentLevel { get; private set; }
         public bool CanAccessMasterClean
         {
             get
@@ -61,30 +63,117 @@ namespace DustBot
 
         public void StartMainLevel(int levelNumber)
         {
-            UI.ShowGame(Levels.LoadMain(levelNumber));
+            CurrentCampaignLevel = Math.Max(1, Math.Min(Levels.CampaignLevelCount, levelNumber));
+            CurrentLevel = Levels.LoadCampaign(CurrentCampaignLevel);
+            UI.ShowGame(CurrentLevel);
         }
 
         public void StartDaily()
         {
-            UI.ShowGame(Levels.LoadDaily(DateTime.Today));
+            CurrentLevel = Levels.LoadDaily(DateTime.Today);
+            UI.ShowGame(CurrentLevel);
         }
 
         public void StartMaster()
         {
             if (!CanAccessMasterClean)
             {
-                UI.ShowMainMenu();
+                UI.ShowMasterCleanLockedMessage();
                 return;
             }
 
-            UI.ShowGame(Levels.LoadMaster(Progression.Data.masterCleanProgress));
+            CurrentLevel = Levels.LoadMaster(Progression.Data.masterCleanProgress);
+            UI.ShowGame(CurrentLevel);
         }
 
         public void StartEndless()
         {
-            UI.ShowGame(Levels.LoadEndless(
+            CurrentLevel = Levels.LoadEndless(
                 Progression.Data.endlessRunSeed,
-                Progression.Data.endlessCurrentLevel));
+                Progression.Data.endlessCurrentLevel);
+            UI.ShowGame(CurrentLevel);
+        }
+
+        public void SetGenerationMode(GenerationMode mode)
+        {
+            if (!LevelGenerationConfig.DeveloperToolsEnabled)
+            {
+                return;
+            }
+
+            Levels.SetGenerationMode(mode);
+            CurrentCampaignLevel = 1;
+            CurrentLevel = null;
+        }
+
+        public void RestartCampaignLevel()
+        {
+            StartMainLevel(CurrentCampaignLevel);
+        }
+
+        public void PreviousCampaignLevel()
+        {
+            StartMainLevel(Math.Max(1, CurrentCampaignLevel - 1));
+        }
+
+        public void NextCampaignLevel()
+        {
+            StartMainLevel(Math.Min(Levels.CampaignLevelCount, CurrentCampaignLevel + 1));
+        }
+
+        public void DebugAddCoins(int amount)
+        {
+            if (!LevelGenerationConfig.DeveloperToolsEnabled) return;
+            Economy.Add(amount);
+            SaveNow();
+        }
+
+        public void DebugUnlockCampaignAndMaster()
+        {
+            if (!LevelGenerationConfig.DeveloperToolsEnabled) return;
+            PlayerProgressData data = Progression.Data;
+            data.highestUnlockedMainLevel = LevelManifest.MainJourneyLevelCount;
+            bool foundFinal = false;
+            for (int i = 0; i < data.mainLevels.Count; i++)
+            {
+                if (data.mainLevels[i].levelNumber == LevelManifest.MainJourneyLevelCount)
+                {
+                    data.mainLevels[i].completed = true;
+                    if (data.mainLevels[i].stars <= 0)
+                    {
+                        data.totalStars++;
+                    }
+                    data.mainLevels[i].stars = Math.Max(1, data.mainLevels[i].stars);
+                    foundFinal = true;
+                    break;
+                }
+            }
+
+            if (!foundFinal)
+            {
+                data.mainLevels.Add(new LevelProgressRecord
+                {
+                    levelNumber = LevelManifest.MainJourneyLevelCount,
+                    completed = true,
+                    stars = 1
+                });
+                data.totalStars++;
+            }
+            SaveNow();
+        }
+
+        public void DebugUnlockAllCosmetics()
+        {
+            if (!LevelGenerationConfig.DeveloperToolsEnabled) return;
+            IReadOnlyList<CosmeticDefinition> all = CosmeticCatalog.All;
+            for (int i = 0; i < all.Count; i++)
+            {
+                if (!Progression.Data.cosmetics.ownedCosmeticIds.Contains(all[i].id))
+                {
+                    Progression.Data.cosmetics.ownedCosmeticIds.Add(all[i].id);
+                }
+            }
+            SaveNow();
         }
 
         public void CommitResult(LevelResult result)
@@ -121,6 +210,8 @@ namespace DustBot
             PlayerSettingsData settings = Progression.Data.settings;
             if (Audio != null)
             {
+                Audio.SoundVolume = settings.soundVolume;
+                Audio.MusicVolume = settings.musicVolume;
                 Audio.SoundEnabled = settings.soundEnabled;
                 Audio.MusicEnabled = settings.musicEnabled;
             }
@@ -179,7 +270,7 @@ namespace DustBot
             UI.ShowLevelSelect(0);
             yield return CaptureAfterLayout(Path.Combine(path, "02-level-select.png"));
 
-            UI.ShowGame(Levels.LoadMain(30));
+            UI.ShowGame(Levels.LoadMain(15));
             yield return null;
             GameScreen journey = UnityEngine.Object.FindAnyObjectByType<GameScreen>();
             if (journey != null)
@@ -196,6 +287,15 @@ namespace DustBot
                 daily.PrepareForStoreScreenshot(6);
             }
             yield return CaptureAfterLayout(Path.Combine(path, "04-daily-challenge.png"));
+
+            UI.ShowGame(Levels.LoadCampaign(GenerationMode.DevelopmentCampaign, 30));
+            yield return null;
+            GameScreen largeMaze = UnityEngine.Object.FindAnyObjectByType<GameScreen>();
+            if (largeMaze != null)
+            {
+                largeMaze.PrepareLargeMazeScreenshot(24);
+            }
+            yield return CaptureAfterLayout(Path.Combine(path, "07-large-maze.png"));
 
             UI.ShowHowToPlay();
             yield return CaptureAfterLayout(Path.Combine(path, "05-how-to-play.png"));

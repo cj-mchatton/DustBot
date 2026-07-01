@@ -40,7 +40,13 @@ namespace DustBot
 
             ResetRewardBreakdown(result);
             int awardedCoins;
-            switch (result.mode)
+            if (result.generationMode != GenerationMode.ProductionCampaign)
+            {
+                awardedCoins = result.dailyChallengeStyle
+                    ? ApplyDevelopmentDailyStyleResult(result)
+                    : ApplyRepeatableResult(result);
+            }
+            else switch (result.mode)
             {
                 case GameMode.MainJourney:
                     awardedCoins = ApplyMainResult(result);
@@ -209,6 +215,35 @@ namespace DustBot
             return RewardTotal(result);
         }
 
+        private int ApplyDevelopmentDailyStyleResult(LevelResult result)
+        {
+            bool firstReward = !string.IsNullOrEmpty(result.levelId) &&
+                               !Data.rewardedCompletionLevelIds.Contains(result.levelId);
+            if (firstReward)
+            {
+                Data.rewardedCompletionLevelIds.Add(result.levelId);
+                result.baseCoins = EconomyConfig.DailyBaseCompletionCoins;
+                result.starBonusCoins = EconomyConfig.StarBonusFor(result.stars, true);
+                if (!result.usedHint)
+                {
+                    result.noHintBonusCoins = EconomyConfig.DailyNoHintBonusCoins;
+                }
+                if (result.firstAttempt)
+                {
+                    result.firstAttemptBonusCoins = EconomyConfig.DailyFirstAttemptBonusCoins;
+                }
+                result.dailyStreak = 3;
+                result.streakBonusCoins = EconomyConfig.DailyStreakReward(result.dailyStreak);
+            }
+
+            if (result.collectedBonus && ClaimDustBunny(result.levelId))
+            {
+                result.bunnyBonusCoins = EconomyConfig.DailyDustBunnyBonusCoins;
+            }
+
+            return RewardTotal(result);
+        }
+
         private void AdvanceDailyStreak(DateTime today, string todayKey)
         {
             DateTime lastDate;
@@ -317,6 +352,9 @@ namespace DustBot
                 Data.settings = new PlayerSettingsData();
             }
 
+            Data.settings.soundVolume = Clamp01WithDefault(Data.settings.soundVolume, 1f);
+            Data.settings.musicVolume = Clamp01WithDefault(Data.settings.musicVolume, 0.8f);
+
             if (Data.cosmetics == null)
             {
                 Data.cosmetics = new CosmeticInventoryData();
@@ -340,7 +378,6 @@ namespace DustBot
             EnsureDefaultOwned(CosmeticCatalog.DefaultTileTheme);
             EnsureDefaultOwned(CosmeticCatalog.DefaultDock);
             EnsureDefaultOwned(CosmeticCatalog.DefaultWinAnimation);
-            EnsureDefaultOwned(CosmeticCatalog.DefaultFailureAnimation);
             EnsureDefaultOwned(CosmeticCatalog.DefaultRoomBackground);
 
             Data.cosmetics.activeBotSkinId = SanitizeActive(
@@ -363,10 +400,7 @@ namespace DustBot
                 Data.cosmetics.activeWinAnimationId,
                 CosmeticCategory.WinAnimation,
                 CosmeticCatalog.DefaultWinAnimation);
-            Data.cosmetics.activeFailureAnimationId = SanitizeActive(
-                Data.cosmetics.activeFailureAnimationId,
-                CosmeticCategory.FailureAnimation,
-                CosmeticCatalog.DefaultFailureAnimation);
+            Data.cosmetics.activeFailureAnimationId = CosmeticCatalog.DefaultFailureAnimation;
             Data.cosmetics.activeRoomBackgroundId = SanitizeActive(
                 Data.cosmetics.activeRoomBackgroundId,
                 CosmeticCategory.RoomBackground,
@@ -376,6 +410,9 @@ namespace DustBot
             {
                 Data.cosmetics.purchaseHistory = new List<string>();
             }
+
+            RemoveRetiredFailureCosmetics(Data.cosmetics.ownedCosmeticIds);
+            RemoveRetiredFailureCosmetics(Data.cosmetics.purchaseHistory);
 
             if (Data.collectedDustBunnyLevelIds == null)
             {
@@ -463,6 +500,34 @@ namespace DustBot
             {
                 Data.cosmetics.ownedCosmeticIds.Add(cosmeticId);
             }
+        }
+
+        private static void RemoveRetiredFailureCosmetics(List<string> cosmeticIds)
+        {
+            if (cosmeticIds == null)
+            {
+                return;
+            }
+
+            for (int i = cosmeticIds.Count - 1; i >= 0; i--)
+            {
+                string cosmeticId = cosmeticIds[i];
+                if (!string.IsNullOrEmpty(cosmeticId) &&
+                    cosmeticId.StartsWith("fail_", StringComparison.Ordinal))
+                {
+                    cosmeticIds.RemoveAt(i);
+                }
+            }
+        }
+
+        private static float Clamp01WithDefault(float value, float fallback)
+        {
+            if (float.IsNaN(value) || value <= 0f)
+            {
+                return fallback;
+            }
+
+            return Math.Max(0.25f, Math.Min(1f, value));
         }
 
         private string SanitizeActive(

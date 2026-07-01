@@ -24,21 +24,28 @@ namespace DustBot
     {
         public int openStartNeighbors;
         public int reachableTiles;
+        public int reachableRouteTiles;
         public int movementTurns;
         public int uniqueVisitedTiles;
         public int closestDistance;
         public int pressureTurns;
+        public int distanceToBotStart;
+        public int distanceToRoute;
+        public bool sameConnectedRegion;
 
         public bool IsStrategicallyActive
         {
             get
             {
                 return openStartNeighbors >= 1 &&
-                       reachableTiles >= 4 &&
-                       movementTurns >= 3 &&
-                       uniqueVisitedTiles >= 3 &&
-                       closestDistance <= 2 &&
-                       pressureTurns >= 2;
+                       sameConnectedRegion &&
+                       reachableTiles >= 5 &&
+                       reachableRouteTiles >= 3 &&
+                       distanceToRoute <= 6 &&
+                       movementTurns >= 2 &&
+                       uniqueVisitedTiles >= 2 &&
+                       closestDistance <= 4 &&
+                       pressureTurns >= 1;
             }
         }
     }
@@ -173,7 +180,9 @@ namespace DustBot
         {
             CatRelevanceReport report = new CatRelevanceReport
             {
-                closestDistance = -1
+                closestDistance = -1,
+                distanceToBotStart = int.MaxValue,
+                distanceToRoute = int.MaxValue
             };
             if (level == null ||
                 level.cat == null ||
@@ -193,7 +202,27 @@ namespace DustBot
                 }
             }
 
-            report.reachableTiles = CountReachableTiles(level, level.cat.startPosition);
+            Dictionary<GridPosition, int> reachable =
+                BuildReachableDistances(level, level.cat.startPosition);
+            report.reachableTiles = reachable.Count;
+            GridPosition botStart = level.Find(CellContent.Start);
+            int botDistance;
+            if (reachable.TryGetValue(botStart, out botDistance))
+            {
+                report.sameConnectedRegion = true;
+                report.distanceToBotStart = botDistance;
+            }
+
+            for (int i = 0; i < dustBotRoute.Count; i++)
+            {
+                int routeDistance;
+                if (reachable.TryGetValue(dustBotRoute[i], out routeDistance))
+                {
+                    report.reachableRouteTiles++;
+                    report.distanceToRoute = Math.Min(report.distanceToRoute, routeDistance);
+                }
+            }
+
             CatRoutePreview preview = SimulateRoute(level, dustBotRoute);
             report.closestDistance = preview.closestDistance;
             HashSet<GridPosition> unique = new HashSet<GridPosition>();
@@ -207,7 +236,7 @@ namespace DustBot
                 }
 
                 int routeIndex = Math.Min(i, dustBotRoute.Count - 1);
-                if (Distance(catPosition, dustBotRoute[routeIndex]) <= 2)
+                if (Distance(catPosition, dustBotRoute[routeIndex]) <= 3)
                 {
                     report.pressureTurns++;
                 }
@@ -295,42 +324,54 @@ namespace DustBot
             return level.IsInside(position) && !IsFurniture(level.GetContent(position));
         }
 
-        private static int CountReachableTiles(
+        public static bool SharesWalkableRegionWithDustBot(LevelDefinition level)
+        {
+            if (level == null ||
+                level.cat == null ||
+                !level.cat.IsEnabled)
+            {
+                return false;
+            }
+
+            Dictionary<GridPosition, int> reachable =
+                BuildReachableDistances(level, level.Find(CellContent.Start));
+            return reachable.ContainsKey(level.cat.startPosition);
+        }
+
+        private static Dictionary<GridPosition, int> BuildReachableDistances(
             LevelDefinition level,
             GridPosition start)
         {
+            Dictionary<GridPosition, int> distances =
+                new Dictionary<GridPosition, int>();
             if (!CanCatEnter(level, start))
             {
-                return 0;
+                return distances;
             }
 
             Queue<GridPosition> frontier = new Queue<GridPosition>();
-            HashSet<GridPosition> visited = new HashSet<GridPosition>();
             frontier.Enqueue(start);
-            visited.Add(start);
+            distances[start] = 0;
             while (frontier.Count > 0)
             {
                 GridPosition current = frontier.Dequeue();
                 for (int i = 0; i < CardinalOffsets.Length; i++)
                 {
                     GridPosition next = current + CardinalOffsets[i];
-                    if (CanCatEnter(level, next) && visited.Add(next))
+                    if (CanCatEnter(level, next) && !distances.ContainsKey(next))
                     {
+                        distances[next] = distances[current] + 1;
                         frontier.Enqueue(next);
                     }
                 }
             }
 
-            return visited.Count;
+            return distances;
         }
 
         private static bool IsFurniture(CellContent content)
         {
-            return content == CellContent.Wall ||
-                   content == CellContent.Toy ||
-                   content == CellContent.Sock ||
-                   content == CellContent.Cord ||
-                   content == CellContent.WetSpot;
+            return CellContentUtility.IsCatBlocker(content);
         }
 
         private static int Distance(GridPosition a, GridPosition b)

@@ -32,7 +32,8 @@ namespace DustBot
                 stars++;
             }
 
-            bool daily = session.Level.mode == GameMode.DailyChallenge;
+            bool daily = session.Level.mode == GameMode.DailyChallenge ||
+                         session.Level.dailyChallengeStyle;
             int coins =
                 (daily ? EconomyConfig.DailyBaseCompletionCoins : EconomyConfig.BaseLevelCompletionCoins) +
                 EconomyConfig.StarBonusFor(stars, daily) +
@@ -46,6 +47,9 @@ namespace DustBot
             {
                 levelId = session.Level.id,
                 mode = session.Level.mode,
+                generationMode = session.Level.generationMode,
+                dailyChallengeStyle = session.Level.dailyChallengeStyle,
+                masterCleanStyle = session.Level.masterCleanStyle,
                 levelNumber = session.Level.levelNumber,
                 stars = stars,
                 coinsEarned = coins,

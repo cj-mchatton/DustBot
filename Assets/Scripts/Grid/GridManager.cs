@@ -58,10 +58,26 @@ namespace DustBot
         public bool CanDrawThrough(GridPosition position)
         {
             CellContent content = GetContent(position);
-            return content == CellContent.Empty ||
-                   content == CellContent.Start ||
-                   content == CellContent.Crumb ||
-                   content == CellContent.Dock;
+            return CellContentUtility.IsWalkableFloor(content);
+        }
+
+        public bool CanDrawMove(GridPosition from, GridPosition to)
+        {
+            if (!IsInside(from) || !IsInside(to) || !CanDrawThrough(to))
+            {
+                return false;
+            }
+
+            Direction direction = DirectionUtility.Between(from, to);
+            return CellContentUtility.AllowsDirection(
+                GetContent(from),
+                GetContent(to),
+                direction);
+        }
+
+        public int MoveCost(GridPosition destination)
+        {
+            return CellContentUtility.MoveCost(GetContent(destination));
         }
     }
 }

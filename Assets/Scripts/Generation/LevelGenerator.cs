@@ -21,33 +21,46 @@ namespace DustBot
                 throw new ArgumentNullException("entry");
             }
 
-            if (entry.generationVersion < 1 || entry.generationVersion > 5)
+            if (entry.generationVersion < 1 || entry.generationVersion > 7)
             {
                 throw new NotSupportedException(
                     "Unsupported DustBot generation version " + entry.generationVersion);
             }
 
+            bool advancedDevMaze = entry.useAdvancedDevMaze &&
+                                   entry.generationMode != GenerationMode.ProductionCampaign;
+            int maximumBoardSize = advancedDevMaze ? 40 : 22;
             if (string.IsNullOrEmpty(entry.seed) ||
                 entry.boardWidth < 2 ||
                 entry.boardHeight < 2 ||
-                entry.boardWidth > 12 ||
-                entry.boardHeight > 12)
+                entry.boardWidth > maximumBoardSize ||
+                entry.boardHeight > maximumBoardSize)
             {
                 throw new ArgumentException("Generation metadata contains an invalid seed or board size.", "entry");
             }
 
             LevelGenerationSettings settings = GetSettings(entry);
             string lastRejection = "No candidate was generated.";
-            for (int candidate = 0; candidate < 24; candidate++)
+            for (int candidate = 0; candidate < 96; candidate++)
             {
-                List<GridPosition> path = GeneratePath(entry, settings, candidate * 128);
-                LevelDefinition level = BuildLevel(entry, mode, settings, path, candidate);
+                LevelDefinition level;
+                if (advancedDevMaze)
+                {
+                    level = AdvancedDevMazeGenerator.Build(entry, mode, candidate);
+                }
+                else if (settings.largeMaze)
+                {
+                    level = BuildLargeMazeLevel(entry, mode, settings, candidate);
+                }
+                else
+                {
+                    List<GridPosition> path = GeneratePath(entry, settings, candidate * 128);
+                    level = BuildLevel(entry, mode, settings, path, candidate);
+                }
                 if (settings.catBehavior != CatBehavior.None &&
-                    mode == GameMode.MainJourney &&
-                    entry.levelNumber == 30 &&
                     (level.cat == null || !level.cat.IsEnabled))
                 {
-                    lastRejection = "A required cat tutorial could not place a fair cat start.";
+                    lastRejection = "The required cat profile could not place a fair, strategically active cat start.";
                     continue;
                 }
 
@@ -59,14 +72,49 @@ namespace DustBot
                 }
 
                 LevelEngagementReport report;
-                if (entry.generationVersion >= 3 &&
+                if (advancedDevMaze)
+                {
+                    AdvancedDevMazeReport advancedReport;
+                    string advancedReason;
+                    if (!AdvancedDevMazeEvaluator.MeetsRequirements(
+                            level,
+                            out advancedReport,
+                            out advancedReason))
+                    {
+                        lastRejection = advancedReason;
+                        continue;
+                    }
+
+                    level.mazeComplexityScore = advancedReport.score;
+                }
+                else if (settings.largeMaze)
+                {
+                    LargeMazeComplexityReport mazeReport;
+                    string mazeReason;
+                    if (!LargeMazeEvaluator.MeetsRequirements(
+                            level,
+                            settings,
+                            out mazeReport,
+                            out mazeReason))
+                    {
+                        lastRejection = mazeReason;
+                        continue;
+                    }
+
+                    level.mazeComplexityScore = mazeReport.score;
+                }
+                else if (entry.generationVersion >= 3 &&
                     !LevelEngagementEvaluator.IsAccepted(level, settings, out report))
                 {
                     lastRejection = string.Format(
                         CultureInfo.InvariantCulture,
-                        "engagement {0}/{1}, turns {2}/{3}, detour {4}/{5}, spread {6}/{7}, decisions {8}/{9}, branches {10}/{11}, bunny detour {12}/{13}, nearby {14}, trivial {15}, dense {16}",
+                        "engagement {0}/{1}, strategic {2}/{3}, cat pressure {4}/{5}, turns {6}/{7}, detour {8}/{9}, spread {10}/{11}, decisions {12}/{13}, branches {14}/{15}, chokepoints {16}, obstacle {17}, bunny detour {18}/{19}, nearby {20}, trivial {21}, dense {22}",
                         report.score,
                         settings.minimumEngagementScore,
+                        report.strategicDepthScore,
+                        settings.minimumStrategicDepthScore,
+                        report.catPressureScore,
+                        settings.minimumCatPressureScore,
                         report.turns,
                         settings.minimumTurns,
                         report.endpointDetour,
@@ -77,6 +125,8 @@ namespace DustBot
                         settings.minimumRouteDecisions,
                         report.temptingBranches,
                         settings.minimumTemptingBranches,
+                        report.chokepoints,
+                        report.obstacleDecisionScore,
                         report.bonusDetourCost,
                         settings.minimumBonusDetour,
                         report.nearbyBlockers + report.nearbyHazards,
@@ -85,9 +135,19 @@ namespace DustBot
                     continue;
                 }
 
-                level.engagementScore = entry.generationVersion >= 3
-                    ? LevelEngagementEvaluator.Analyze(level).score
-                    : 0;
+                if (entry.generationVersion >= 3)
+                {
+                    LevelEngagementReport acceptedReport = LevelEngagementEvaluator.Analyze(level);
+                    level.engagementScore = acceptedReport.score;
+                    level.strategicDepthScore = acceptedReport.strategicDepthScore;
+                    level.catPressureScore = acceptedReport.catPressureScore;
+                }
+                else
+                {
+                    level.engagementScore = 0;
+                    level.strategicDepthScore = 0;
+                    level.catPressureScore = 0;
+                }
                 return level;
             }
 
@@ -145,12 +205,15 @@ namespace DustBot
                     minimumTurns = 8,
                     minimumDetour = 5,
                     minimumEngagementScore = 38,
+                    minimumStrategicDepthScore = 44,
+                    minimumCatPressureScore = 8,
                     moveLimitSlack = 2,
                     hardPathLimit = true,
                     minimumCrumbSpread = 3,
                     minimumRouteDecisions = 3,
                     minimumTemptingBranches = 2,
-                    minimumBonusDetour = 2
+                    minimumBonusDetour = 2,
+                    routeModifierCount = 3
                 };
             }
             else if (entry.difficultyTier == DifficultyTier.Master)
@@ -167,101 +230,166 @@ namespace DustBot
                     minimumTurns = 9,
                     minimumDetour = 6,
                     minimumEngagementScore = 42,
+                    minimumStrategicDepthScore = 48,
+                    minimumCatPressureScore = 9,
                     moveLimitSlack = 1,
                     hardPathLimit = true,
                     minimumCrumbSpread = 3,
                     minimumRouteDecisions = 3,
                     minimumTemptingBranches = 2,
-                    minimumBonusDetour = 2
+                    minimumBonusDetour = 2,
+                    routeModifierCount = 3
+                };
+            }
+            else if (level <= 7)
+            {
+                settings = new LevelGenerationSettings
+                {
+                    minimumPathLength = 7,
+                    maximumPathLength = Math.Min(area - 3, 11),
+                    crumbCount = 2,
+                    blockerCount = 2,
+                    hazardCount = 0,
+                    includeBonus = false,
+                    minimumTurns = 2,
+                    minimumDetour = 1,
+                    minimumEngagementScore = 13,
+                    minimumStrategicDepthScore = 12,
+                    moveLimitSlack = 4,
+                    hardPathLimit = false,
+                    minimumCrumbSpread = 2,
+                    minimumRouteDecisions = 1,
+                    minimumTemptingBranches = 1,
+                    routeModifierCount = level >= 6 ? 1 : 0
+                };
+            }
+            else if (level <= 12)
+            {
+                settings = new LevelGenerationSettings
+                {
+                    minimumPathLength = 9,
+                    maximumPathLength = Math.Min(area - 3, 15),
+                    crumbCount = 2,
+                    blockerCount = 4,
+                    hazardCount = level >= 10 ? 1 : 0,
+                    includeBonus = false,
+                    minimumTurns = 4,
+                    minimumDetour = 2,
+                    minimumEngagementScore = 22,
+                    minimumStrategicDepthScore = 20,
+                    moveLimitSlack = 3,
+                    hardPathLimit = level >= 10,
+                    minimumCrumbSpread = 2,
+                    minimumRouteDecisions = 2,
+                    minimumTemptingBranches = 1,
+                    routeModifierCount = 1
                 };
             }
             else if (level <= 20)
             {
                 settings = new LevelGenerationSettings
                 {
-                    minimumPathLength = 9,
-                    maximumPathLength = Math.Min(area - 3, 14),
-                    crumbCount = level >= 19 ? 3 : 2,
-                    blockerCount = 2,
-                    hazardCount = level >= 18 ? 1 : 0,
-                    includeBonus = level == 20 && entry.archetype == LevelArchetype.DustBunnyDetour,
-                    minimumTurns = 3,
-                    minimumDetour = 2,
-                    minimumEngagementScore = 16,
-                    moveLimitSlack = 4,
-                    hardPathLimit = false,
+                    minimumPathLength = 12,
+                    maximumPathLength = Math.Min(area - 3, 18),
+                    crumbCount = level >= 16 ? 3 : 2,
+                    blockerCount = 4,
+                    hazardCount = 1,
+                    includeBonus = level >= 18 && entry.archetype == LevelArchetype.DustBunnyDetour,
+                    minimumTurns = 5,
+                    minimumDetour = 3,
+                    minimumEngagementScore = 28,
+                    minimumStrategicDepthScore = 28,
+                    moveLimitSlack = 2,
+                    hardPathLimit = level >= 15 &&
+                                    (entry.archetype == LevelArchetype.TightPath ||
+                                     entry.archetype == LevelArchetype.TrickRoute ||
+                                     entry.archetype == LevelArchetype.ChallengeRoute),
                     minimumCrumbSpread = 2,
-                    minimumRouteDecisions = 1,
-                    minimumTemptingBranches = 1
+                    minimumRouteDecisions = 2,
+                    minimumTemptingBranches = 1,
+                    routeModifierCount = level >= 15 ? 2 : 1
                 };
             }
             else if (level <= 35)
             {
                 settings = new LevelGenerationSettings
                 {
-                    minimumPathLength = 11,
-                    maximumPathLength = Math.Min(area - 3, 18),
-                    crumbCount = level >= 28 ? 3 : 2,
-                    blockerCount = 3,
-                    hazardCount = 1,
+                    minimumPathLength = 14,
+                    maximumPathLength = Math.Min(area - 3, 22),
+                    crumbCount = level >= 24 ? 3 : 2,
+                    blockerCount = 5,
+                    hazardCount = 2,
                     includeBonus = entry.archetype == LevelArchetype.DustBunnyDetour,
                     bonusRequiredForThreeStars = entry.archetype == LevelArchetype.DustBunnyDetour,
-                    minimumTurns = 4,
-                    minimumDetour = 2,
-                    minimumEngagementScore = 21,
-                    moveLimitSlack = 3,
-                    hardPathLimit = false,
+                    minimumTurns = 6,
+                    minimumDetour = 4,
+                    minimumEngagementScore = 34,
+                    minimumStrategicDepthScore = 34,
+                    minimumCatPressureScore = 6,
+                    moveLimitSlack = 2,
+                    hardPathLimit = entry.archetype == LevelArchetype.TightPath ||
+                                    entry.archetype == LevelArchetype.ChallengeRoute ||
+                                    entry.archetype == LevelArchetype.TrickRoute ||
+                                    level % 5 == 0,
                     minimumCrumbSpread = 2,
                     minimumRouteDecisions = 2,
                     minimumTemptingBranches = 1,
-                    minimumBonusDetour = entry.archetype == LevelArchetype.DustBunnyDetour ? 2 : 0
+                    minimumBonusDetour = entry.archetype == LevelArchetype.DustBunnyDetour ? 2 : 0,
+                    routeModifierCount = level >= 26 ? 2 : 1
                 };
             }
             else if (level <= 60)
             {
                 settings = new LevelGenerationSettings
                 {
-                    minimumPathLength = 15,
-                    maximumPathLength = Math.Min(area - 4, 23),
+                    minimumPathLength = 17,
+                    maximumPathLength = Math.Min(area - 4, 26),
                     crumbCount = level % 6 == 0 ? 4 : 3,
-                    blockerCount = 4,
-                    hazardCount = 2,
+                    blockerCount = 6,
+                    hazardCount = 3,
                     includeBonus = entry.archetype == LevelArchetype.DustBunnyDetour || level % 8 == 0,
                     bonusRequiredForThreeStars = entry.archetype == LevelArchetype.DustBunnyDetour,
-                    minimumTurns = 5,
-                    minimumDetour = 3,
-                    minimumEngagementScore = 27,
+                    minimumTurns = 6,
+                    minimumDetour = 4,
+                    minimumEngagementScore = 38,
+                    minimumStrategicDepthScore = 40,
+                    minimumCatPressureScore = 7,
                     moveLimitSlack = 2,
                     hardPathLimit =
                         entry.archetype == LevelArchetype.TightPath ||
                         entry.archetype == LevelArchetype.ChallengeRoute ||
+                        entry.archetype == LevelArchetype.TrickRoute ||
                         level % 6 == 0,
                     minimumCrumbSpread = 2,
-                    minimumRouteDecisions = 2,
-                    minimumTemptingBranches = 1,
-                    minimumBonusDetour = entry.archetype == LevelArchetype.DustBunnyDetour ? 2 : 0
+                    minimumRouteDecisions = 3,
+                    minimumTemptingBranches = 2,
+                    minimumBonusDetour = entry.archetype == LevelArchetype.DustBunnyDetour ? 2 : 0,
+                    routeModifierCount = level % 5 == 0 ? 3 : 2
                 };
             }
             else if (level <= 100)
             {
                 settings = new LevelGenerationSettings
                 {
-                    minimumPathLength = 18,
-                    maximumPathLength = Math.Min(area - 5, 28),
+                    minimumPathLength = 20,
+                    maximumPathLength = Math.Min(area - 5, 31),
                     crumbCount = level % 5 == 0 ? 5 : 4,
-                    blockerCount = 5,
-                    hazardCount = 3,
+                    blockerCount = 7,
+                    hazardCount = 4,
                     includeBonus = entry.archetype == LevelArchetype.DustBunnyDetour || level % 5 == 0,
                     bonusRequiredForThreeStars = entry.archetype == LevelArchetype.DustBunnyDetour,
-                    minimumTurns = 6,
-                    minimumDetour = 4,
-                    minimumEngagementScore = 32,
-                    moveLimitSlack = 2,
+                    minimumTurns = 7,
+                    minimumDetour = 5,
+                    minimumEngagementScore = 43,
+                    minimumStrategicDepthScore = 46,
+                    minimumCatPressureScore = 8,
+                    moveLimitSlack = 1,
                     hardPathLimit = entry.archetype != LevelArchetype.Breather && level % 3 != 1,
                     minimumCrumbSpread = 2,
                     minimumRouteDecisions = 3,
                     minimumTemptingBranches = 2,
-                    minimumBonusDetour = entry.archetype == LevelArchetype.DustBunnyDetour ? 2 : 0
+                    minimumBonusDetour = entry.archetype == LevelArchetype.DustBunnyDetour ? 2 : 0,
+                    routeModifierCount = level % 4 == 0 ? 4 : 3
                 };
             }
             else
@@ -269,43 +397,74 @@ namespace DustBot
                 int tier = Math.Max(1, (int)entry.difficultyTier);
                 settings = new LevelGenerationSettings
                 {
-                    minimumPathLength = Math.Min(area - 10, 19 + tier * 2),
-                    maximumPathLength = Math.Min(area - 4, 28 + tier * 3),
+                    minimumPathLength = Math.Min(area - 10, 21 + tier * 2),
+                    maximumPathLength = Math.Min(area - 4, 30 + tier * 3),
                     crumbCount = Math.Min(5, 3 + tier / 2),
-                    blockerCount = Math.Min(10, 4 + tier),
-                    hazardCount = Math.Min(7, 2 + tier / 2),
+                    blockerCount = Math.Min(10, 5 + tier),
+                    hazardCount = Math.Min(7, 3 + tier / 2),
                     includeBonus = entry.archetype == LevelArchetype.DustBunnyDetour ||
                                    entry.archetype == LevelArchetype.ChallengeRoute ||
                                    level % 4 == 0,
                     bonusRequiredForThreeStars =
                         entry.archetype == LevelArchetype.DustBunnyDetour ||
                         entry.archetype == LevelArchetype.ChallengeRoute,
-                    minimumTurns = Math.Min(10, 5 + tier / 2),
-                    minimumDetour = Math.Min(8, 3 + tier / 2),
-                    minimumEngagementScore = Math.Min(48, 28 + tier * 3),
-                    moveLimitSlack = tier >= (int)DifficultyTier.Expert ? 1 : 2,
+                    minimumTurns = Math.Min(11, 6 + tier / 2),
+                    minimumDetour = Math.Min(9, 4 + tier / 2),
+                    minimumEngagementScore = Math.Min(58, 36 + tier * 4),
+                    minimumStrategicDepthScore = Math.Min(56, 32 + tier * 4),
+                    minimumCatPressureScore = tier >= (int)DifficultyTier.Expert ? 9 : 8,
+                    moveLimitSlack = tier >= (int)DifficultyTier.Hard ? 1 : 2,
                     hardPathLimit = entry.archetype != LevelArchetype.Breather && level % 4 != 0,
-                    minimumCrumbSpread = level <= 250
-                        ? 2
-                        : Math.Min(4, 2 + tier / 3),
-                    minimumRouteDecisions = 2,
-                    minimumTemptingBranches = 1,
-                    minimumBonusDetour = entry.archetype == LevelArchetype.DustBunnyDetour ? 2 : 0
+                    minimumCrumbSpread = 2,
+                    minimumRouteDecisions = 3,
+                    minimumTemptingBranches = 2,
+                    minimumBonusDetour = entry.archetype == LevelArchetype.DustBunnyDetour ? 2 : 0,
+                    routeModifierCount = Math.Min(5, 2 + tier / 2)
                 };
             }
 
             ApplyArchetype(settings, entry.archetype, area);
+            if (entry.useLargeMaze && entry.generationVersion >= 7)
+            {
+                int tier = Math.Max((int)DifficultyTier.Medium, (int)entry.difficultyTier);
+                settings.largeMaze = true;
+                settings.minimumPathLength = Math.Max(18, area / 4);
+                settings.maximumPathLength = Math.Max(settings.minimumPathLength + 8, area * 3 / 4);
+                settings.crumbCount = tier >= (int)DifficultyTier.Master
+                    ? 8
+                    : tier >= (int)DifficultyTier.Expert ? 7 : tier >= (int)DifficultyTier.Hard ? 6 : 4;
+                settings.blockerCount = 0;
+                settings.hazardCount = 0;
+                settings.includeBonus = true;
+                settings.bonusRequiredForThreeStars = true;
+                settings.hardPathLimit = tier >= (int)DifficultyTier.Hard;
+                settings.moveLimitSlack = tier >= (int)DifficultyTier.Expert ? 2 : 4;
+                settings.routeModifierCount = Math.Min(7, Math.Max(2, area / 75));
+                settings.routeModifierStyle = RouteModifierStyle.Sticky;
+                settings.forcedRouteModifierStyle = true;
+                settings.minimumMazeBranches = Math.Max(3, area / 60);
+                settings.minimumMazeDeadEnds = Math.Max(3, area / 80);
+                settings.minimumMazeLoops = Math.Max(2, area / 150);
+                settings.minimumMazeComplexityScore = tier >= (int)DifficultyTier.Master
+                    ? 112
+                    : tier >= (int)DifficultyTier.Expert ? 100 : tier >= (int)DifficultyTier.Hard ? 88 : 68;
+                settings.minimumEngagementScore = 0;
+                settings.minimumStrategicDepthScore = 0;
+                settings.minimumCatPressureScore = 0;
+            }
             if (entry.archetype == LevelArchetype.Breather)
             {
                 settings.crumbCount = Math.Max(2, settings.crumbCount);
                 settings.minimumCrumbSpread = Math.Min(settings.minimumCrumbSpread, 1);
                 settings.minimumRouteDecisions = Math.Min(settings.minimumRouteDecisions, 1);
                 settings.minimumTemptingBranches = 0;
+                settings.routeModifierCount = Math.Min(settings.routeModifierCount, 1);
+                settings.minimumStrategicDepthScore = Math.Min(settings.minimumStrategicDepthScore, 22);
                 settings.hardPathLimit = false;
             }
             if (entry.generationVersion >= 5 &&
                 !entry.useDailyChallengeProfile &&
-                entry.levelNumber == 30)
+                entry.levelNumber == 21)
             {
                 settings.minimumPathLength = 9;
                 settings.maximumPathLength = Math.Min(area - 5, 14);
@@ -317,10 +476,13 @@ namespace DustBot
                 settings.minimumTurns = 3;
                 settings.minimumDetour = 2;
                 settings.minimumEngagementScore = 18;
+                settings.minimumStrategicDepthScore = 18;
+                settings.minimumCatPressureScore = 5;
                 settings.hardPathLimit = false;
                 settings.minimumCrumbSpread = 1;
                 settings.minimumRouteDecisions = 1;
                 settings.minimumTemptingBranches = 0;
+                settings.routeModifierCount = 0;
             }
             settings.minimumPathLength = Math.Max(5, Math.Min(area - 3, settings.minimumPathLength));
             settings.maximumPathLength = Math.Max(
@@ -328,12 +490,101 @@ namespace DustBot
                 Math.Min(area - 1, settings.maximumPathLength));
             settings.crumbCount = Math.Max(
                 1,
-                Math.Min(5, Math.Min(settings.crumbCount, Math.Max(1, settings.minimumPathLength / 3))));
+                Math.Min(settings.largeMaze ? 9 : 5,
+                    Math.Min(settings.crumbCount, Math.Max(1, settings.minimumPathLength / 3))));
             settings.blockerCount = Math.Max(0, Math.Min(area / 4, settings.blockerCount));
             settings.hazardCount = Math.Max(0, Math.Min(area / 5, settings.hazardCount));
+            settings.routeModifierCount = Math.Max(
+                0,
+                Math.Min(Math.Max(0, settings.minimumPathLength / 5), settings.routeModifierCount));
             if (entry.generationVersion >= 5)
             {
-                settings.catBehavior = SelectCatBehavior(entry);
+                settings.catBehavior = settings.largeMaze
+                    ? CatBehavior.None
+                    : entry.hasCatBehaviorOverride
+                    ? entry.catBehaviorOverride
+                    : SelectCatBehavior(entry);
+                if (settings.catBehavior != CatBehavior.None)
+                {
+                    settings.blockerCount = Math.Max(3, settings.blockerCount - 1);
+                    settings.hazardCount = Math.Max(0, settings.hazardCount - 1);
+                    settings.blockerCount = Math.Min(
+                        settings.blockerCount,
+                        entry.levelNumber < 36
+                            ? 3
+                            : area <= 36 ? 4 : 6);
+                    settings.hazardCount = Math.Min(
+                        settings.hazardCount,
+                        entry.levelNumber < 36 ? 1 : 2);
+                    settings.routeModifierCount = 0;
+                    settings.minimumTemptingBranches = Math.Max(1, settings.minimumTemptingBranches - 1);
+                    settings.minimumCatPressureScore = Math.Max(5, settings.minimumCatPressureScore);
+                    settings.minimumTurns = Math.Min(settings.minimumTurns, 6);
+                    settings.minimumDetour = Math.Min(settings.minimumDetour, 6);
+                    settings.minimumCrumbSpread = 1;
+                    settings.minimumBonusDetour = 0;
+                    if (entry.seed.IndexOf("DustBot_Main_", StringComparison.Ordinal) >= 0)
+                    {
+                        settings.includeBonus = false;
+                        settings.bonusRequiredForThreeStars = false;
+                    }
+                    if (!entry.useDailyChallengeProfile &&
+                        entry.difficultyTier != DifficultyTier.Master &&
+                        entry.levelNumber < 36)
+                    {
+                        settings.minimumPathLength = Math.Min(settings.minimumPathLength, 11);
+                        settings.maximumPathLength = Math.Min(settings.maximumPathLength, Math.Max(13, area - 5));
+                        settings.crumbCount = Math.Min(settings.crumbCount, 2);
+                        settings.blockerCount = Math.Min(settings.blockerCount, 3);
+                        settings.hazardCount = Math.Min(settings.hazardCount, 1);
+                        settings.hardPathLimit = false;
+                        settings.minimumTurns = Math.Min(settings.minimumTurns, 4);
+                        settings.minimumDetour = Math.Min(settings.minimumDetour, 2);
+                        settings.minimumEngagementScore = Math.Min(settings.minimumEngagementScore, 28);
+                        settings.minimumStrategicDepthScore = Math.Min(settings.minimumStrategicDepthScore, 30);
+                        settings.minimumRouteDecisions = Math.Min(settings.minimumRouteDecisions, 2);
+                        settings.minimumTemptingBranches = Math.Min(settings.minimumTemptingBranches, 1);
+                    }
+                    else if (!entry.useDailyChallengeProfile &&
+                             entry.difficultyTier != DifficultyTier.Master)
+                    {
+                        int catMinimum = area <= 36 ? 15 : 18;
+                        int catMaximum = area <= 36 ? 23 : 28;
+                        settings.minimumPathLength = Math.Min(settings.minimumPathLength, catMinimum);
+                        settings.maximumPathLength = Math.Min(
+                            settings.maximumPathLength,
+                            Math.Max(settings.minimumPathLength + 4, catMaximum));
+                        settings.crumbCount = Math.Min(settings.crumbCount, area <= 49 ? 2 : 3);
+                        settings.minimumTurns = Math.Min(settings.minimumTurns, area <= 36 ? 6 : 7);
+                        settings.minimumDetour = Math.Min(settings.minimumDetour, area <= 36 ? 4 : 5);
+                        settings.minimumEngagementScore = Math.Min(settings.minimumEngagementScore, area <= 36 ? 36 : 42);
+                        settings.minimumStrategicDepthScore = Math.Min(settings.minimumStrategicDepthScore, area <= 36 ? 38 : 44);
+                        settings.minimumRouteDecisions = Math.Min(settings.minimumRouteDecisions, 3);
+                        settings.minimumTemptingBranches = Math.Min(settings.minimumTemptingBranches, 1);
+                    }
+                    else
+                    {
+                        int catMinimum = area <= 49 ? 20 : 24;
+                        int catMaximum = area <= 49 ? 30 : 36;
+                        settings.minimumPathLength = Math.Min(settings.minimumPathLength, catMinimum);
+                        settings.maximumPathLength = Math.Min(
+                            settings.maximumPathLength,
+                            Math.Max(settings.minimumPathLength + 6, catMaximum));
+                        settings.crumbCount = Math.Min(settings.crumbCount, 4);
+                        settings.minimumTurns = Math.Min(settings.minimumTurns, 8);
+                        settings.minimumDetour = Math.Min(settings.minimumDetour, 5);
+                        settings.minimumEngagementScore = Math.Min(settings.minimumEngagementScore, 44);
+                        settings.minimumStrategicDepthScore = Math.Min(settings.minimumStrategicDepthScore, 50);
+                        settings.minimumRouteDecisions = Math.Min(settings.minimumRouteDecisions, 3);
+                        settings.minimumTemptingBranches = Math.Min(settings.minimumTemptingBranches, 2);
+                    }
+                }
+            }
+            if (entry.hasRouteModifierOverride)
+            {
+                settings.routeModifierCount = Math.Max(0, entry.routeModifierCountOverride);
+                settings.routeModifierStyle = entry.routeModifierStyle;
+                settings.forcedRouteModifierStyle = true;
             }
             return settings;
         }
@@ -478,6 +729,511 @@ namespace DustBot
             return settings;
         }
 
+        private static LevelDefinition BuildLargeMazeLevel(
+            LevelManifestEntry entry,
+            GameMode mode,
+            LevelGenerationSettings settings,
+            int candidate)
+        {
+            DeterministicRandom random = new DeterministicRandom(
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0}_v7_large_maze_{1}",
+                    entry.seed,
+                    candidate));
+            bool[,] floor = CarveDepthFirstMaze(
+                entry.boardWidth,
+                entry.boardHeight,
+                random);
+            List<GridPosition> mainRoute = FindMazeDiameter(floor);
+            if (mainRoute.Count < Math.Max(
+                    8,
+                    (entry.boardWidth + entry.boardHeight) * 3 / 4))
+            {
+                return BuildInvalidLargeMazePlaceholder(entry, mode);
+            }
+
+            List<GridPosition> solutionRoute = new List<GridPosition>(mainRoute);
+            HashSet<GridPosition> bonusDetourCells = new HashSet<GridPosition>();
+            GridPosition bonusPosition = new GridPosition(-1, -1);
+            bool hasBonus = settings.includeBonus &&
+                            TryCarveBonusDetour(
+                                floor,
+                                solutionRoute,
+                                random,
+                                bonusDetourCells,
+                                out bonusPosition);
+
+            int roomCount = Math.Max(1, entry.boardWidth * entry.boardHeight / 120);
+            CarveMazeRooms(floor, roomCount, random);
+            int loopCount = Math.Max(
+                settings.minimumMazeLoops + 2,
+                entry.boardWidth * entry.boardHeight / 48);
+            CarveMazeLoops(floor, loopCount, random);
+
+            LevelDefinition level = new LevelDefinition
+            {
+                id = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0}_{1}",
+                    mode,
+                    entry.levelNumber),
+                mode = mode,
+                generationMode = entry.generationMode,
+                levelNumber = entry.levelNumber,
+                seed = entry.seed,
+                generationVersion = entry.generationVersion,
+                difficultyTier = entry.difficultyTier,
+                width = entry.boardWidth,
+                height = entry.boardHeight,
+                hardPathLimit = settings.hardPathLimit,
+                archetype = entry.archetype,
+                testArchetype = entry.testArchetype,
+                dailyChallengeStyle = entry.dailyChallengeStyle,
+                masterCleanStyle = entry.masterCleanStyle,
+                largeMaze = true,
+                themeId = entry.themeId,
+                mechanicSet = "LargeMazePath",
+                objectiveSet = entry.objectiveSet,
+                cat = new CatDefinition { behavior = CatBehavior.None }
+            };
+
+            for (int y = 0; y < level.height; y++)
+            {
+                for (int x = 0; x < level.width; x++)
+                {
+                    if (floor[x, y])
+                    {
+                        continue;
+                    }
+
+                    GridPosition wall = new GridPosition(x, y);
+                    CellContent content = random.Chance(1, 12)
+                        ? CellContent.Toy
+                        : CellContent.Wall;
+                    level.cells.Add(new GridCellDefinition(wall, content));
+                }
+            }
+
+            level.cells.Add(new GridCellDefinition(solutionRoute[0], CellContent.Start));
+            level.cells.Add(new GridCellDefinition(
+                solutionRoute[solutionRoute.Count - 1],
+                CellContent.Dock));
+            if (hasBonus)
+            {
+                level.objectives.collectBonus = true;
+                level.objectives.bonusRequiredForThreeStars = true;
+                level.bonusPosition = bonusPosition;
+            }
+
+            List<int> crumbIndices = PickLargeMazeCrumbIndices(
+                solutionRoute,
+                settings.crumbCount,
+                bonusDetourCells);
+            for (int i = 0; i < crumbIndices.Count; i++)
+            {
+                level.cells.Add(new GridCellDefinition(
+                    solutionRoute[crumbIndices[i]],
+                    CellContent.Crumb));
+            }
+
+            for (int i = 0; i < solutionRoute.Count - 1; i++)
+            {
+                level.expectedSolution.Add(new SolutionStep(
+                    solutionRoute[i],
+                    DirectionUtility.Between(solutionRoute[i], solutionRoute[i + 1])));
+            }
+
+            PlaceRouteModifiers(level, solutionRoute, settings, candidate);
+            RefreshMoveTargets(level, settings, entry.levelNumber);
+            level.twoStarMoveTarget = level.parMoves + Math.Max(4, level.parMoves / 10);
+            level.threeStarMoveTarget = level.parMoves;
+            level.moveLimit = level.hardPathLimit
+                ? level.parMoves + Math.Max(settings.moveLimitSlack, level.parMoves / 22)
+                : 0;
+            return level;
+        }
+
+        private static LevelDefinition BuildInvalidLargeMazePlaceholder(
+            LevelManifestEntry entry,
+            GameMode mode)
+        {
+            LevelDefinition level = new LevelDefinition
+            {
+                id = mode + "_" + entry.levelNumber,
+                mode = mode,
+                generationMode = entry.generationMode,
+                levelNumber = entry.levelNumber,
+                seed = entry.seed,
+                generationVersion = entry.generationVersion,
+                difficultyTier = entry.difficultyTier,
+                width = entry.boardWidth,
+                height = entry.boardHeight,
+                largeMaze = true
+            };
+            level.cells.Add(new GridCellDefinition(new GridPosition(0, 0), CellContent.Start));
+            level.cells.Add(new GridCellDefinition(new GridPosition(1, 0), CellContent.Dock));
+            level.expectedSolution.Add(new SolutionStep(
+                new GridPosition(0, 0),
+                Direction.Right));
+            level.parMoves = 1;
+            level.twoStarMoveTarget = 1;
+            level.threeStarMoveTarget = 1;
+            return level;
+        }
+
+        private static bool[,] CarveDepthFirstMaze(
+            int width,
+            int height,
+            DeterministicRandom random)
+        {
+            bool[,] floor = new bool[width, height];
+            int nodeColumns = Math.Max(1, (width - 1) / 2);
+            int nodeRows = Math.Max(1, (height - 1) / 2);
+            GridPosition start = new GridPosition(
+                1 + random.Range(0, nodeColumns) * 2,
+                1 + random.Range(0, nodeRows) * 2);
+            start.x = Math.Min(width - 2, start.x);
+            start.y = Math.Min(height - 2, start.y);
+            bool[,] visited = new bool[width, height];
+            List<GridPosition> stack = new List<GridPosition>();
+            stack.Add(start);
+            floor[start.x, start.y] = true;
+            visited[start.x, start.y] = true;
+            while (stack.Count > 0)
+            {
+                GridPosition current = stack[stack.Count - 1];
+                List<GridPosition> candidates = new List<GridPosition>();
+                for (int i = 0; i < CardinalOffsets.Length; i++)
+                {
+                    GridPosition next = new GridPosition(
+                        current.x + CardinalOffsets[i].x * 2,
+                        current.y + CardinalOffsets[i].y * 2);
+                    if (next.x > 0 && next.y > 0 &&
+                        next.x < width - 1 && next.y < height - 1 &&
+                        !visited[next.x, next.y])
+                    {
+                        candidates.Add(next);
+                    }
+                }
+
+                if (candidates.Count == 0)
+                {
+                    stack.RemoveAt(stack.Count - 1);
+                    continue;
+                }
+
+                random.Shuffle(candidates);
+                GridPosition selected = candidates[0];
+                GridPosition between = new GridPosition(
+                    (current.x + selected.x) / 2,
+                    (current.y + selected.y) / 2);
+                floor[between.x, between.y] = true;
+                floor[selected.x, selected.y] = true;
+                visited[selected.x, selected.y] = true;
+                stack.Add(selected);
+            }
+
+            return floor;
+        }
+
+        private static List<GridPosition> FindMazeDiameter(bool[,] floor)
+        {
+            GridPosition first = new GridPosition(-1, -1);
+            for (int y = 0; y < floor.GetLength(1) && first.x < 0; y++)
+            {
+                for (int x = 0; x < floor.GetLength(0); x++)
+                {
+                    if (floor[x, y])
+                    {
+                        first = new GridPosition(x, y);
+                        break;
+                    }
+                }
+            }
+
+            GridPosition[,] parents;
+            int[,] distances;
+            GridPosition endA = FindFarthestMazeCell(
+                floor,
+                first,
+                out parents,
+                out distances);
+            GridPosition endB = FindFarthestMazeCell(
+                floor,
+                endA,
+                out parents,
+                out distances);
+            List<GridPosition> reversed = new List<GridPosition>();
+            GridPosition current = endB;
+            reversed.Add(current);
+            while (current != endA)
+            {
+                GridPosition parent = parents[current.x, current.y];
+                if (parent.x < 0)
+                {
+                    break;
+                }
+
+                current = parent;
+                reversed.Add(current);
+            }
+
+            reversed.Reverse();
+            return reversed;
+        }
+
+        private static GridPosition FindFarthestMazeCell(
+            bool[,] floor,
+            GridPosition start,
+            out GridPosition[,] parents,
+            out int[,] distances)
+        {
+            int width = floor.GetLength(0);
+            int height = floor.GetLength(1);
+            parents = new GridPosition[width, height];
+            distances = new int[width, height];
+            for (int y = 0; y < height; y++)
+            {
+                for (int x = 0; x < width; x++)
+                {
+                    parents[x, y] = new GridPosition(-1, -1);
+                    distances[x, y] = -1;
+                }
+            }
+
+            Queue<GridPosition> queue = new Queue<GridPosition>();
+            queue.Enqueue(start);
+            distances[start.x, start.y] = 0;
+            GridPosition farthest = start;
+            while (queue.Count > 0)
+            {
+                GridPosition current = queue.Dequeue();
+                if (distances[current.x, current.y] > distances[farthest.x, farthest.y])
+                {
+                    farthest = current;
+                }
+
+                for (int i = 0; i < CardinalOffsets.Length; i++)
+                {
+                    GridPosition next = current + CardinalOffsets[i];
+                    if (next.x < 0 || next.y < 0 ||
+                        next.x >= width || next.y >= height ||
+                        !floor[next.x, next.y] ||
+                        distances[next.x, next.y] >= 0)
+                    {
+                        continue;
+                    }
+
+                    distances[next.x, next.y] = distances[current.x, current.y] + 1;
+                    parents[next.x, next.y] = current;
+                    queue.Enqueue(next);
+                }
+            }
+
+            return farthest;
+        }
+
+        private static bool TryCarveBonusDetour(
+            bool[,] floor,
+            List<GridPosition> route,
+            DeterministicRandom random,
+            HashSet<GridPosition> detourCells,
+            out GridPosition bonusPosition)
+        {
+            List<int> candidates = new List<int>();
+            for (int i = 1; i < route.Count - 2; i++)
+            {
+                Direction direction = DirectionUtility.Between(route[i], route[i + 1]);
+                if (direction != Direction.None)
+                {
+                    candidates.Add(i);
+                }
+            }
+
+            random.Shuffle(candidates);
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                int index = candidates[i];
+                GridPosition from = route[index];
+                GridPosition to = route[index + 1];
+                GridPosition[] perpendiculars = DirectionUtility.Between(from, to) == Direction.Up ||
+                                                DirectionUtility.Between(from, to) == Direction.Down
+                    ? new[] { new GridPosition(1, 0), new GridPosition(-1, 0) }
+                    : new[] { new GridPosition(0, 1), new GridPosition(0, -1) };
+                if (random.Chance(1, 2))
+                {
+                    GridPosition swap = perpendiculars[0];
+                    perpendiculars[0] = perpendiculars[1];
+                    perpendiculars[1] = swap;
+                }
+
+                for (int side = 0; side < perpendiculars.Length; side++)
+                {
+                    GridPosition first = from + perpendiculars[side];
+                    GridPosition second = to + perpendiculars[side];
+                    if (!IsInteriorMazeCell(floor, first) ||
+                        !IsInteriorMazeCell(floor, second) ||
+                        floor[first.x, first.y] ||
+                        floor[second.x, second.y])
+                    {
+                        continue;
+                    }
+
+                    floor[first.x, first.y] = true;
+                    floor[second.x, second.y] = true;
+                    route.Insert(index + 1, first);
+                    route.Insert(index + 2, second);
+                    detourCells.Add(first);
+                    detourCells.Add(second);
+                    bonusPosition = second;
+                    return true;
+                }
+            }
+
+            bonusPosition = new GridPosition(-1, -1);
+            return false;
+        }
+
+        private static void CarveMazeRooms(
+            bool[,] floor,
+            int count,
+            DeterministicRandom random)
+        {
+            int width = floor.GetLength(0);
+            int height = floor.GetLength(1);
+            for (int room = 0; room < count; room++)
+            {
+                int roomWidth = Math.Min(width - 2, random.Range(2, 4));
+                int roomHeight = Math.Min(height - 2, random.Range(2, 4));
+                if (roomWidth < 2 || roomHeight < 2) continue;
+                int left = random.Range(1, Math.Max(2, width - roomWidth));
+                int bottom = random.Range(1, Math.Max(2, height - roomHeight));
+                left = Math.Min(left, width - roomWidth - 1);
+                bottom = Math.Min(bottom, height - roomHeight - 1);
+                for (int y = bottom; y < bottom + roomHeight; y++)
+                {
+                    for (int x = left; x < left + roomWidth; x++)
+                    {
+                        floor[x, y] = true;
+                    }
+                }
+            }
+        }
+
+        private static void CarveMazeLoops(
+            bool[,] floor,
+            int count,
+            DeterministicRandom random)
+        {
+            List<GridPosition> candidates = new List<GridPosition>();
+            int width = floor.GetLength(0);
+            int height = floor.GetLength(1);
+            for (int y = 1; y < height - 1; y++)
+            {
+                for (int x = 1; x < width - 1; x++)
+                {
+                    if (floor[x, y]) continue;
+                    bool horizontal = floor[x - 1, y] && floor[x + 1, y];
+                    bool vertical = floor[x, y - 1] && floor[x, y + 1];
+                    if (horizontal || vertical) candidates.Add(new GridPosition(x, y));
+                }
+            }
+
+            random.Shuffle(candidates);
+            int carved = 0;
+            for (int i = 0; i < candidates.Count && carved < count; i++)
+            {
+                GridPosition candidate = candidates[i];
+                int nearbyOpen = 0;
+                bool wouldEraseDeadEnd = false;
+                for (int offset = 0; offset < CardinalOffsets.Length; offset++)
+                {
+                    GridPosition neighbor = candidate + CardinalOffsets[offset];
+                    if (floor[neighbor.x, neighbor.y])
+                    {
+                        nearbyOpen++;
+                        if (CountFloorNeighbors(floor, neighbor) <= 1)
+                        {
+                            wouldEraseDeadEnd = true;
+                        }
+                    }
+                }
+
+                if (nearbyOpen == 2 && !wouldEraseDeadEnd)
+                {
+                    floor[candidate.x, candidate.y] = true;
+                    carved++;
+                }
+            }
+        }
+
+        private static int CountFloorNeighbors(bool[,] floor, GridPosition position)
+        {
+            int count = 0;
+            for (int i = 0; i < CardinalOffsets.Length; i++)
+            {
+                GridPosition neighbor = position + CardinalOffsets[i];
+                if (neighbor.x >= 0 && neighbor.y >= 0 &&
+                    neighbor.x < floor.GetLength(0) &&
+                    neighbor.y < floor.GetLength(1) &&
+                    floor[neighbor.x, neighbor.y])
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private static List<int> PickLargeMazeCrumbIndices(
+            List<GridPosition> route,
+            int count,
+            HashSet<GridPosition> excluded)
+        {
+            List<int> chosen = new List<int>();
+            int minimumIndexGap = Math.Max(3, route.Count / Math.Max(8, count * 2));
+            for (int selection = 0; selection < count; selection++)
+            {
+                int target = ((selection + 1) * (route.Count - 1)) / (count + 1);
+                int best = -1;
+                int bestDistance = int.MaxValue;
+                for (int index = 2; index < route.Count - 2; index++)
+                {
+                    if (excluded.Contains(route[index])) continue;
+                    bool spaced = true;
+                    for (int i = 0; i < chosen.Count; i++)
+                    {
+                        if (Math.Abs(chosen[i] - index) < minimumIndexGap)
+                        {
+                            spaced = false;
+                            break;
+                        }
+                    }
+
+                    if (!spaced) continue;
+                    int distance = Math.Abs(index - target);
+                    if (distance < bestDistance)
+                    {
+                        best = index;
+                        bestDistance = distance;
+                    }
+                }
+
+                if (best >= 0) chosen.Add(best);
+            }
+
+            chosen.Sort();
+            return chosen;
+        }
+
+        private static bool IsInteriorMazeCell(bool[,] floor, GridPosition position)
+        {
+            return position.x > 0 && position.y > 0 &&
+                   position.x < floor.GetLength(0) - 1 &&
+                   position.y < floor.GetLength(1) - 1;
+        }
+
         private static List<GridPosition> GeneratePath(
             LevelManifestEntry entry,
             LevelGenerationSettings settings,
@@ -491,7 +1247,7 @@ namespace DustBot
                         CultureInfo.InvariantCulture,
                         "{0}_v{1}_path_{2}",
                         entry.seed,
-                        Math.Min(entry.generationVersion, 4),
+                        SeedVersion(entry.generationVersion),
                         canonicalAttempt));
                 int targetLength = random.Range(settings.minimumPathLength, settings.maximumPathLength + 1);
                 GridPosition start = RandomEdgePosition(random, entry.boardWidth, entry.boardHeight);
@@ -561,6 +1317,16 @@ namespace DustBot
             List<GridPosition> path,
             int decorationSalt)
         {
+            if (settings.catBehavior != CatBehavior.None && !entry.useProceduralCatLayout)
+            {
+                LevelDefinition catTemplate =
+                    BuildCatTemplateLevel(entry, mode, settings, decorationSalt);
+                if (catTemplate != null)
+                {
+                    return catTemplate;
+                }
+            }
+
             LevelDefinition level = new LevelDefinition
             {
                 id = string.Format(
@@ -569,6 +1335,7 @@ namespace DustBot
                     mode,
                     entry.levelNumber),
                 mode = mode,
+                generationMode = entry.generationMode,
                 levelNumber = entry.levelNumber,
                 seed = entry.seed,
                 generationVersion = entry.generationVersion,
@@ -585,6 +1352,9 @@ namespace DustBot
                 threeStarMoveTarget = path.Count - 1,
                 hardPathLimit = settings.hardPathLimit,
                 archetype = entry.archetype,
+                testArchetype = entry.testArchetype,
+                dailyChallengeStyle = entry.dailyChallengeStyle,
+                masterCleanStyle = entry.masterCleanStyle,
                 themeId = entry.themeId,
                 mechanicSet = entry.mechanicSet,
                 objectiveSet = entry.objectiveSet
@@ -593,7 +1363,7 @@ namespace DustBot
             if (settings.catBehavior != CatBehavior.None)
             {
                 level.mechanicSet = "CatChaseTurns";
-                if (mode == GameMode.MainJourney && entry.levelNumber == 30)
+                if (mode == GameMode.MainJourney && entry.levelNumber == 21)
                 {
                     level.tutorialMessage =
                         "CAT CHASE • Swipe one tile. Then the cat moves twice, horizontal first. Use furniture, clean, and dock.";
@@ -639,6 +1409,9 @@ namespace DustBot
                     new SolutionStep(path[i], DirectionUtility.Between(path[i], path[i + 1])));
             }
 
+            PlaceRouteModifiers(level, path, settings, decorationSalt);
+            RefreshMoveTargets(level, settings, entry.levelNumber);
+
             if (entry.generationVersion == 1)
             {
                 PlaceOffPathContentV1(level, path, settings, decorationSalt);
@@ -650,10 +1423,162 @@ namespace DustBot
 
             if (settings.catBehavior != CatBehavior.None)
             {
-                TryPlaceCat(level, path, settings.catBehavior, decorationSalt);
+                if (!TryPlaceCat(level, path, settings.catBehavior, decorationSalt))
+                {
+                    RelaxCatArena(level, path, decorationSalt);
+                    TryPlaceCat(level, path, settings.catBehavior, decorationSalt + 101);
+                }
             }
 
             return level;
+        }
+
+        private static LevelDefinition BuildCatTemplateLevel(
+            LevelManifestEntry entry,
+            GameMode mode,
+            LevelGenerationSettings settings,
+            int decorationSalt)
+        {
+            const int templateWidth = 6;
+            const int templateHeight = 5;
+            int variant = (int)(DeterministicRandom.StableHash(
+                entry.seed + "_cat_template_" + decorationSalt) % 4);
+            LevelDefinition level = new LevelDefinition
+            {
+                id = string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0}_{1}",
+                    mode,
+                    entry.levelNumber),
+                mode = mode,
+                generationMode = entry.generationMode,
+                levelNumber = entry.levelNumber,
+                seed = entry.seed,
+                generationVersion = entry.generationVersion,
+                difficultyTier = entry.difficultyTier,
+                width = templateWidth,
+                height = templateHeight,
+                hardPathLimit = settings.hardPathLimit,
+                archetype = entry.archetype,
+                testArchetype = entry.testArchetype,
+                dailyChallengeStyle = entry.dailyChallengeStyle,
+                masterCleanStyle = entry.masterCleanStyle,
+                themeId = entry.themeId,
+                mechanicSet = "CatChaseTurns",
+                objectiveSet = entry.objectiveSet,
+                cat = new CatDefinition
+                {
+                    behavior = settings.catBehavior,
+                    startPosition = TransformCatTemplatePosition(
+                        new GridPosition(5, 0),
+                        variant),
+                    horizontalFirst = true
+                }
+            };
+
+            level.cells.Add(new GridCellDefinition(
+                TransformCatTemplatePosition(new GridPosition(2, 3), variant),
+                CellContent.Start));
+            level.cells.Add(new GridCellDefinition(
+                TransformCatTemplatePosition(new GridPosition(5, 1), variant),
+                CellContent.Dock));
+            level.cells.Add(new GridCellDefinition(
+                TransformCatTemplatePosition(new GridPosition(4, 1), variant),
+                CellContent.Crumb));
+
+            GridPosition[] walls =
+            {
+                new GridPosition(0, 0),
+                new GridPosition(1, 3),
+                new GridPosition(2, 0),
+                new GridPosition(2, 2),
+                new GridPosition(3, 0),
+                new GridPosition(5, 3),
+                new GridPosition(5, 4)
+            };
+            for (int i = 0; i < walls.Length; i++)
+            {
+                level.cells.Add(new GridCellDefinition(
+                    TransformCatTemplatePosition(walls[i], variant),
+                    CellContent.Wall));
+            }
+
+            List<SolutionStep> solution;
+            int searchLimit = templateWidth * templateHeight * 4;
+            if (!CatLevelSolver.TrySolve(level, searchLimit, out solution))
+            {
+                return null;
+            }
+
+            level.expectedSolution.AddRange(solution);
+            if (entry.useDailyChallengeProfile)
+            {
+                List<GridPosition> route = CatLevelSolver.BuildRoute(level, solution);
+                if (route.Count > 2)
+                {
+                    level.objectives.collectBonus = true;
+                    level.objectives.bonusRequiredForThreeStars = true;
+                    level.bonusPosition = route[Math.Max(1, route.Count / 2)];
+                }
+            }
+
+            RefreshMoveTargets(level, settings, entry.levelNumber);
+            level.moveLimit = level.hardPathLimit
+                ? level.parMoves + Math.Max(2, settings.moveLimitSlack)
+                : 0;
+            level.twoStarMoveTarget = level.parMoves + 3;
+            level.threeStarMoveTarget = level.parMoves;
+
+            if (entry.levelNumber == 21 && mode == GameMode.MainJourney)
+            {
+                level.tutorialMessage =
+                    "CAT CHASE • Swipe one tile. Then the cat moves twice, horizontal first. Use furniture, clean, and dock.";
+            }
+
+            return level;
+        }
+
+        private static GridPosition TransformCatTemplatePosition(
+            GridPosition position,
+            int variant)
+        {
+            int x = position.x;
+            int y = position.y;
+            if ((variant & 1) != 0)
+            {
+                x = 5 - x;
+            }
+
+            if ((variant & 2) != 0)
+            {
+                y = 4 - y;
+            }
+
+            return new GridPosition(x, y);
+        }
+
+        private static void RelaxCatArena(
+            LevelDefinition level,
+            List<GridPosition> path,
+            int decorationSalt)
+        {
+            HashSet<GridPosition> route = new HashSet<GridPosition>(path);
+            for (int i = level.cells.Count - 1; i >= 0; i--)
+            {
+                GridCellDefinition cell = level.cells[i];
+                if (cell == null || route.Contains(cell.position))
+                {
+                    continue;
+                }
+
+                if (cell.content == CellContent.Sock ||
+                    cell.content == CellContent.Cord ||
+                    cell.content == CellContent.WetSpot)
+                {
+                    level.cells.RemoveAt(i);
+                    continue;
+                }
+            }
         }
 
         private static void PlaceOffPathContentV1(
@@ -681,7 +1606,7 @@ namespace DustBot
                     CultureInfo.InvariantCulture,
                     "{0}_v{1}_decor",
                     level.seed,
-                    Math.Min(level.generationVersion, 4) + "_" + decorationSalt));
+                    SeedVersion(level.generationVersion) + "_" + decorationSalt));
             random.Shuffle(available);
             int cursor = 0;
 
@@ -734,7 +1659,7 @@ namespace DustBot
                     CultureInfo.InvariantCulture,
                     "{0}_v{1}_decor",
                     level.seed,
-                    Math.Min(level.generationVersion, 4) + "_" + decorationSalt));
+                    SeedVersion(level.generationVersion) + "_" + decorationSalt));
             random.Shuffle(available);
             random.Shuffle(hazardCandidates);
             random.Shuffle(blockerCandidates);
@@ -796,6 +1721,270 @@ namespace DustBot
                     random.Chance(1, 4) ? CellContent.Toy : CellContent.Wall));
                 placedBlockers++;
             }
+        }
+
+        private static void PlaceRouteModifiers(
+            LevelDefinition level,
+            List<GridPosition> path,
+            LevelGenerationSettings settings,
+            int decorationSalt)
+        {
+            if (settings.routeModifierCount <= 0 ||
+                path.Count < 6)
+            {
+                return;
+            }
+
+            HashSet<GridPosition> routeSet = new HashSet<GridPosition>(path);
+            List<int> candidates = new List<int>();
+            for (int i = 1; i < path.Count - 1; i++)
+            {
+                if (!HasSerializedCell(level, path[i]) &&
+                    path[i] != level.bonusPosition)
+                {
+                    candidates.Add(i);
+                }
+            }
+
+            DeterministicRandom random = new DeterministicRandom(
+                string.Format(
+                    CultureInfo.InvariantCulture,
+                    "{0}_v{1}_route_mod_{2}",
+                    level.seed,
+                    SeedVersion(level.generationVersion),
+                    decorationSalt));
+            Dictionary<int, int> candidateScores = new Dictionary<int, int>();
+            for (int i = 0; i < candidates.Count; i++)
+            {
+                int pathIndex = candidates[i];
+                candidateScores[pathIndex] =
+                    ScoreRouteModifierCandidate(level, path, routeSet, pathIndex) +
+                    random.Range(0, 5);
+            }
+
+            candidates.Sort(delegate(int left, int right)
+            {
+                int scoreCompare = candidateScores[right].CompareTo(candidateScores[left]);
+                return scoreCompare != 0 ? scoreCompare : left.CompareTo(right);
+            });
+
+            int placed = 0;
+            for (int i = 0; i < candidates.Count && placed < settings.routeModifierCount; i++)
+            {
+                int pathIndex = candidates[i];
+                Direction incoming = DirectionUtility.Between(path[pathIndex - 1], path[pathIndex]);
+                Direction outgoing = DirectionUtility.Between(path[pathIndex], path[pathIndex + 1]);
+                bool straight = incoming != Direction.None && incoming == outgoing;
+                bool branchy = HasOffRouteWalkableNeighbor(level, path[pathIndex], routeSet);
+                bool chokepoint = CountOpenNeighbors(level, path[pathIndex]) <= 2;
+                CellContent content;
+                if (settings.forcedRouteModifierStyle &&
+                    settings.routeModifierStyle == RouteModifierStyle.Mixed)
+                {
+                    int forcedSlot = placed % 3;
+                    content = forcedSlot == 0
+                        ? CellContent.Sticky
+                        : forcedSlot == 1 ? OneWayFor(incoming) : CellContent.Fragile;
+                }
+                else if (settings.routeModifierStyle == RouteModifierStyle.Sticky)
+                {
+                    content = CellContent.Sticky;
+                }
+                else if (settings.routeModifierStyle == RouteModifierStyle.OneWay)
+                {
+                    content = OneWayFor(incoming);
+                }
+                else if (settings.routeModifierStyle == RouteModifierStyle.Fragile)
+                {
+                    content = CellContent.Fragile;
+                }
+                else
+                {
+                    int roll = random.Range(0, 100);
+                    if (level.levelNumber >= 8 &&
+                        straight &&
+                        (branchy || chokepoint || level.hardPathLimit) &&
+                        roll < 50)
+                    {
+                        content = OneWayFor(incoming);
+                    }
+                    else if (level.levelNumber >= 21 &&
+                             (chokepoint || !straight || level.cat.IsEnabled) &&
+                             roll >= 72)
+                    {
+                        content = CellContent.Fragile;
+                    }
+                    else
+                    {
+                        content = CellContent.Sticky;
+                    }
+                }
+
+                level.cells.Add(new GridCellDefinition(path[pathIndex], content));
+                placed++;
+            }
+        }
+
+        private static int ScoreRouteModifierCandidate(
+            LevelDefinition level,
+            List<GridPosition> path,
+            HashSet<GridPosition> routeSet,
+            int pathIndex)
+        {
+            GridPosition position = path[pathIndex];
+            Direction incoming = DirectionUtility.Between(path[pathIndex - 1], position);
+            Direction outgoing = DirectionUtility.Between(position, path[pathIndex + 1]);
+            bool straight = incoming != Direction.None && incoming == outgoing;
+            int score = 0;
+            if (HasOffRouteWalkableNeighbor(level, position, routeSet))
+            {
+                score += 9;
+            }
+
+            int openNeighbors = CountOpenNeighbors(level, position);
+            if (openNeighbors <= 2)
+            {
+                score += 8;
+            }
+
+            if (straight)
+            {
+                score += 4;
+            }
+
+            if (level.hardPathLimit)
+            {
+                score += 5;
+            }
+
+            if (level.objectives.collectBonus &&
+                Manhattan(position, level.bonusPosition) <= 2)
+            {
+                score += 7;
+            }
+
+            if (DistanceToNearestContent(level, position, CellContent.Crumb) <= 2)
+            {
+                score += 6;
+            }
+
+            GridPosition dock = level.Find(CellContent.Dock);
+            if (Manhattan(position, dock) <= 3 && pathIndex > path.Count / 2)
+            {
+                score += 5;
+            }
+
+            int middleDistance = Math.Abs(pathIndex - path.Count / 2);
+            score += Math.Max(0, 6 - middleDistance);
+            return score;
+        }
+
+        private static bool HasOffRouteWalkableNeighbor(
+            LevelDefinition level,
+            GridPosition position,
+            HashSet<GridPosition> routeSet)
+        {
+            for (int i = 0; i < CardinalOffsets.Length; i++)
+            {
+                GridPosition neighbor = position + CardinalOffsets[i];
+                if (level.IsInside(neighbor) &&
+                    !routeSet.Contains(neighbor) &&
+                    level.GetContent(neighbor) == CellContent.Empty)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static int CountOpenNeighbors(LevelDefinition level, GridPosition position)
+        {
+            int count = 0;
+            for (int i = 0; i < CardinalOffsets.Length; i++)
+            {
+                GridPosition neighbor = position + CardinalOffsets[i];
+                if (level.IsInside(neighbor) &&
+                    CellContentUtility.IsWalkableFloor(level.GetContent(neighbor)))
+                {
+                    count++;
+                }
+            }
+
+            return count;
+        }
+
+        private static int DistanceToNearestContent(
+            LevelDefinition level,
+            GridPosition position,
+            CellContent content)
+        {
+            int distance = int.MaxValue;
+            for (int i = 0; i < level.cells.Count; i++)
+            {
+                if (level.cells[i].content == content)
+                {
+                    distance = Math.Min(distance, Manhattan(position, level.cells[i].position));
+                }
+            }
+
+            return distance == int.MaxValue ? 99 : distance;
+        }
+
+        private static bool HasSerializedCell(LevelDefinition level, GridPosition position)
+        {
+            for (int i = 0; i < level.cells.Count; i++)
+            {
+                if (level.cells[i].position == position)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static CellContent OneWayFor(Direction direction)
+        {
+            switch (direction)
+            {
+                case Direction.Up: return CellContent.OneWayUp;
+                case Direction.Right: return CellContent.OneWayRight;
+                case Direction.Down: return CellContent.OneWayDown;
+                case Direction.Left: return CellContent.OneWayLeft;
+                default: return CellContent.Sticky;
+            }
+        }
+
+        private static void RefreshMoveTargets(
+            LevelDefinition level,
+            LevelGenerationSettings settings,
+            int levelNumber)
+        {
+            int moveCost = CalculateSolutionMoveCost(level, level.expectedSolution);
+            level.parMoves = moveCost;
+            level.threeStarMoveTarget = moveCost;
+            level.twoStarMoveTarget = moveCost +
+                                      (levelNumber <= 20 ? 3 :
+                                       levelNumber <= 60 ? 2 : 1);
+            level.moveLimit = level.hardPathLimit
+                ? moveCost + settings.moveLimitSlack
+                : 0;
+        }
+
+        private static int CalculateSolutionMoveCost(
+            LevelDefinition level,
+            IList<SolutionStep> solution)
+        {
+            int cost = 0;
+            GridPosition current = level.Find(CellContent.Start);
+            for (int i = 0; i < solution.Count; i++)
+            {
+                current += DirectionUtility.ToOffset(solution[i].direction);
+                cost += CellContentUtility.MoveCost(level.GetContent(current));
+            }
+
+            return cost;
         }
 
         private static List<int> PickEvenlySpacedIndices(
@@ -920,6 +2109,13 @@ namespace DustBot
             return Math.Abs(a.x - b.x) + Math.Abs(a.y - b.y) == 1;
         }
 
+        private static int SeedVersion(int generationVersion)
+        {
+            return generationVersion >= 6
+                ? 6
+                : Math.Min(generationVersion, 4);
+        }
+
         private static bool IsAdjacentToRoute(
             GridPosition position,
             HashSet<GridPosition> route)
@@ -969,27 +2165,22 @@ namespace DustBot
 
             if (daily)
             {
-                if (hash % 3 == 0)
-                {
-                    return CatBehavior.None;
-                }
-
-                return CatBehavior.Curious;
+                return hash % 10 < 7 ? CatBehavior.Curious : CatBehavior.None;
             }
 
             if (master)
             {
-                return CatBehavior.Curious;
+                return hash % 10 < 8 ? CatBehavior.Curious : CatBehavior.None;
             }
 
             if (endless)
             {
-                if (entry.levelNumber < 8 || hash % 3 == 0)
+                if (entry.levelNumber < 8)
                 {
                     return CatBehavior.None;
                 }
 
-                return CatBehavior.Curious;
+                return hash % 10 < 7 ? CatBehavior.Curious : CatBehavior.None;
             }
 
             int level = entry.levelNumber;
@@ -998,24 +2189,27 @@ namespace DustBot
                 return CatBehavior.None;
             }
 
-            if (level == 30)
+            if (level == 21)
             {
                 return CatBehavior.Curious;
             }
 
             if (level <= 35)
             {
-                return hash % 4 == 0
-                    ? CatBehavior.Curious
-                    : CatBehavior.None;
+                return hash % 10 < 4 ? CatBehavior.Curious : CatBehavior.None;
             }
 
-            if (level <= 75)
+            if (level <= 60)
             {
-                return hash % 2 == 0 ? CatBehavior.Curious : CatBehavior.None;
+                return hash % 10 < 7 ? CatBehavior.Curious : CatBehavior.None;
             }
 
-            return hash % 4 == 0 ? CatBehavior.None : CatBehavior.Curious;
+            if (level <= 100)
+            {
+                return hash % 10 < 7 ? CatBehavior.Curious : CatBehavior.None;
+            }
+
+            return hash % 10 < 7 ? CatBehavior.Curious : CatBehavior.None;
         }
 
         private static bool TryPlaceCat(
@@ -1024,7 +2218,7 @@ namespace DustBot
             CatBehavior behavior,
             int decorationSalt)
         {
-            HashSet<GridPosition> occupied = new HashSet<GridPosition>(route);
+            HashSet<GridPosition> occupied = new HashSet<GridPosition>();
             for (int i = 0; i < level.cells.Count; i++)
             {
                 occupied.Add(level.cells[i].position);
@@ -1037,8 +2231,8 @@ namespace DustBot
                 {
                     GridPosition position = new GridPosition(x, y);
                     if (!occupied.Contains(position) &&
-                        Manhattan(position, route[0]) >= 3 &&
-                        DistanceToRoute(position, route) <= 4)
+                        Manhattan(position, route[0]) >= 2 &&
+                        DistanceToRoute(position, route) <= 6)
                     {
                         candidates.Add(position);
                     }
@@ -1048,28 +2242,38 @@ namespace DustBot
             DeterministicRandom random = new DeterministicRandom(
                 string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0}_v5_cat_{1}",
+                    "{0}_v{1}_cat_{2}",
                     level.seed,
+                    SeedVersion(level.generationVersion),
                     decorationSalt));
             random.Shuffle(candidates);
+            int layoutProfile = (int)(DeterministicRandom.StableHash(
+                level.seed + "_cat_layout_" + decorationSalt) % 15);
 
             GridPosition best = new GridPosition(-1, -1);
             List<SolutionStep> bestSolution = null;
             int bestScore = int.MinValue;
-            int candidateLimit = Math.Min(20, candidates.Count);
+            int candidateLimit = Math.Min(72, candidates.Count);
             for (int i = 0; i < candidateLimit; i++)
             {
+                int routeIndex = NearestRouteIndex(candidates[i], route);
                 level.cat = new CatDefinition
                 {
-                    behavior = CatBehavior.Curious,
+                    behavior = behavior,
                     startPosition = candidates[i],
                     horizontalFirst = true
                 };
 
+                if (!CatObstacleSimulator.SharesWalkableRegionWithDustBot(level))
+                {
+                    continue;
+                }
+
                 List<SolutionStep> solution;
+                int area = level.width * level.height;
                 int searchLimit = Math.Min(
-                    level.width * level.height * 3,
-                    Math.Max(route.Count + 18, level.width * level.height));
+                    area * 4,
+                    Math.Max(route.Count + 36, area * 2));
                 if (!CatLevelSolver.TrySolve(level, searchLimit, out solution))
                 {
                     continue;
@@ -1091,7 +2295,13 @@ namespace DustBot
                     Math.Min(10, relevance.movementTurns) * 3 +
                     Math.Min(12, relevance.uniqueVisitedTiles) * 2 +
                     Math.Min(12, relevance.reachableTiles) -
-                    solution.Count;
+                    solution.Count +
+                    ScoreCatLayoutProfile(
+                        level,
+                        route,
+                        candidates[i],
+                        routeIndex,
+                        layoutProfile);
                 if (score > bestScore)
                 {
                     bestScore = score;
@@ -1108,20 +2318,161 @@ namespace DustBot
 
             level.cat = new CatDefinition
             {
-                behavior = CatBehavior.Curious,
+                behavior = behavior,
                 startPosition = best,
                 horizontalFirst = true
             };
             level.expectedSolution.Clear();
             level.expectedSolution.AddRange(bestSolution);
-            level.parMoves = bestSolution.Count;
-            level.threeStarMoveTarget = bestSolution.Count;
-            level.twoStarMoveTarget = bestSolution.Count + 3;
+            int moveCost = CalculateSolutionMoveCost(level, bestSolution);
+            level.parMoves = moveCost;
+            level.threeStarMoveTarget = moveCost;
+            level.twoStarMoveTarget = moveCost + 3;
             level.moveLimit = level.hardPathLimit
-                ? bestSolution.Count + 5
+                ? moveCost + 5
                 : 0;
 
             return true;
+        }
+
+        private static int ScoreCatLayoutProfile(
+            LevelDefinition level,
+            List<GridPosition> route,
+            GridPosition candidate,
+            int routeIndex,
+            int layoutProfile)
+        {
+            int routeDistance = DistanceToRoute(candidate, route);
+            int startDistance = Manhattan(candidate, route[0]);
+            int dockDistance = Manhattan(candidate, route[route.Count - 1]);
+            int crumbDistance = DistanceToNearestContent(level, candidate, CellContent.Crumb);
+            int openNeighbors = CountOpenNeighbors(level, candidate);
+            bool nearTurn = IsNearRouteTurn(route, routeIndex, 2);
+            bool middleRoute = routeIndex > route.Count / 4 &&
+                               routeIndex < route.Count - route.Count / 4;
+            int score = Math.Max(0, 8 - routeDistance) +
+                        Math.Max(0, 6 - Math.Abs(startDistance - 4));
+
+            switch (layoutProfile)
+            {
+                case 0: // Corridor Trap
+                    score += openNeighbors <= 2 ? 12 : 0;
+                    score += middleRoute ? 5 : 0;
+                    break;
+                case 1: // Horizontal Priority Puzzle
+                    score += Math.Abs(candidate.y - route[Math.Max(0, routeIndex)].y) <= 1 ? 10 : 0;
+                    score += Math.Abs(candidate.x - route[0].x) >= 3 ? 4 : 0;
+                    break;
+                case 2: // Loop Around Furniture
+                    score += nearTurn ? 12 : 0;
+                    score += openNeighbors >= 2 ? 4 : 0;
+                    break;
+                case 3: // Split Room
+                    score += routeDistance >= 2 && routeDistance <= 4 ? 10 : 0;
+                    score += middleRoute ? 4 : 0;
+                    break;
+                case 4: // Chokepoint Timing
+                    score += openNeighbors <= 2 ? 10 : 0;
+                    score += routeDistance <= 2 ? 5 : 0;
+                    break;
+                case 5: // Dust Bunny Risk
+                    score += level.objectives.collectBonus &&
+                             Manhattan(candidate, level.bonusPosition) <= 4 ? 14 : 0;
+                    break;
+                case 6: // Cat Toy/Furniture Delay Scaffold
+                    score += DistanceToNearestContent(level, candidate, CellContent.Toy) <= 3 ? 10 : 0;
+                    score += openNeighbors <= 3 ? 3 : 0;
+                    break;
+                case 7: // Gate/Switch-style Chase, approximated by route commitment
+                    score += CountRouteModifiersNear(level, route, routeIndex, 4) > 0 ? 12 : 0;
+                    break;
+                case 8: // Crumb Order Chase
+                    score += crumbDistance <= 3 ? 12 : 0;
+                    score += middleRoute ? 3 : 0;
+                    break;
+                case 9: // Near-Catch Puzzle
+                    score += startDistance <= 5 && routeDistance <= 2 ? 12 : 0;
+                    break;
+                case 10: // Safe Pocket Puzzle
+                    score += openNeighbors == 1 || openNeighbors == 2 ? 9 : 0;
+                    score += nearTurn ? 4 : 0;
+                    break;
+                case 11: // Long Route vs Safe Route
+                    score += routeDistance >= 3 ? 9 : 0;
+                    score += dockDistance >= 5 ? 4 : 0;
+                    break;
+                case 12: // Around the Table
+                    score += nearTurn ? 8 : 0;
+                    score += DistanceToNearestContent(level, candidate, CellContent.Wall) <= 2 ? 7 : 0;
+                    break;
+                case 13: // Cat at Chokepoint
+                    score += openNeighbors <= 2 && routeDistance <= 2 ? 13 : 0;
+                    break;
+                default: // Dock Pressure
+                    score += dockDistance <= 5 && routeIndex > route.Count / 2 ? 13 : 0;
+                    break;
+            }
+
+            return score;
+        }
+
+        private static int NearestRouteIndex(GridPosition position, List<GridPosition> route)
+        {
+            int bestIndex = 0;
+            int bestDistance = int.MaxValue;
+            for (int i = 0; i < route.Count; i++)
+            {
+                int distance = Manhattan(position, route[i]);
+                if (distance < bestDistance)
+                {
+                    bestDistance = distance;
+                    bestIndex = i;
+                }
+            }
+
+            return bestIndex;
+        }
+
+        private static bool IsNearRouteTurn(
+            List<GridPosition> route,
+            int routeIndex,
+            int radius)
+        {
+            int start = Math.Max(1, routeIndex - radius);
+            int end = Math.Min(route.Count - 2, routeIndex + radius);
+            for (int i = start; i <= end; i++)
+            {
+                Direction incoming = DirectionUtility.Between(route[i - 1], route[i]);
+                Direction outgoing = DirectionUtility.Between(route[i], route[i + 1]);
+                if (incoming != Direction.None &&
+                    outgoing != Direction.None &&
+                    incoming != outgoing)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private static int CountRouteModifiersNear(
+            LevelDefinition level,
+            List<GridPosition> route,
+            int routeIndex,
+            int radius)
+        {
+            int count = 0;
+            int start = Math.Max(0, routeIndex - radius);
+            int end = Math.Min(route.Count - 1, routeIndex + radius);
+            for (int i = start; i <= end; i++)
+            {
+                if (CellContentUtility.IsRouteModifier(level.GetContent(route[i])))
+                {
+                    count++;
+                }
+            }
+
+            return count;
         }
 
         private static int DistanceToRoute(
@@ -1153,25 +2504,33 @@ namespace DustBot
                     settings.crumbCount++;
                     settings.minimumTurns++;
                     settings.minimumEngagementScore += 2;
+                    settings.minimumStrategicDepthScore += 3;
                     break;
                 case LevelArchetype.BlockerMaze:
                     settings.blockerCount += 2;
                     settings.minimumEngagementScore += 2;
+                    settings.minimumStrategicDepthScore += 2;
+                    settings.minimumRouteDecisions++;
                     break;
                 case LevelArchetype.HazardAvoidance:
                     settings.hazardCount += 2;
                     settings.minimumEngagementScore += 3;
+                    settings.minimumStrategicDepthScore += 3;
                     break;
                 case LevelArchetype.DustBunnyDetour:
                     settings.includeBonus = true;
                     settings.minimumDetour++;
                     settings.minimumEngagementScore += 3;
+                    settings.minimumStrategicDepthScore += 4;
                     break;
                 case LevelArchetype.TightPath:
                     settings.blockerCount += 2;
                     settings.hazardCount++;
+                    settings.routeModifierCount++;
                     settings.maximumPathLength = Math.Min(area - 2, settings.maximumPathLength + 2);
                     settings.minimumEngagementScore += 3;
+                    settings.minimumStrategicDepthScore += 4;
+                    settings.minimumTemptingBranches++;
                     break;
                 case LevelArchetype.Breather:
                     settings.minimumPathLength = Math.Max(6, settings.minimumPathLength - 3);
@@ -1181,24 +2540,33 @@ namespace DustBot
                     settings.crumbCount = Math.Max(1, settings.crumbCount - 1);
                     settings.blockerCount = Math.Max(0, settings.blockerCount - 1);
                     settings.hazardCount = Math.Max(0, settings.hazardCount - 1);
+                    settings.routeModifierCount = Math.Max(0, settings.routeModifierCount - 1);
                     settings.minimumTurns = Math.Max(2, settings.minimumTurns - 1);
                     settings.minimumDetour = Math.Max(0, settings.minimumDetour - 1);
                     settings.minimumEngagementScore = Math.Max(8, settings.minimumEngagementScore - 4);
+                    settings.minimumStrategicDepthScore = Math.Max(10, settings.minimumStrategicDepthScore - 6);
                     break;
                 case LevelArchetype.TrickRoute:
                     settings.minimumTurns++;
                     settings.minimumDetour += 2;
+                    settings.routeModifierCount++;
                     settings.minimumEngagementScore += 4;
+                    settings.minimumStrategicDepthScore += 6;
+                    settings.minimumTemptingBranches++;
                     break;
                 case LevelArchetype.ChallengeRoute:
                     settings.crumbCount++;
                     settings.blockerCount++;
                     settings.hazardCount++;
+                    settings.routeModifierCount++;
                     settings.includeBonus = true;
                     settings.bonusRequiredForThreeStars = true;
                     settings.minimumTurns++;
                     settings.minimumDetour++;
                     settings.minimumEngagementScore += 5;
+                    settings.minimumStrategicDepthScore += 8;
+                    settings.minimumRouteDecisions++;
+                    settings.minimumTemptingBranches++;
                     break;
             }
         }

@@ -8,10 +8,10 @@ namespace DustBot
         {
             LevelDefinition level = new LevelDefinition
             {
-                id = "MainJourney_30",
+                id = "MainJourney_21",
                 mode = GameMode.MainJourney,
-                levelNumber = 30,
-                seed = "DustBot_Cat_Tutorial_30",
+                levelNumber = 21,
+                seed = "DustBot_Cat_Tutorial_21",
                 generationVersion = LevelManifest.CurrentGenerationVersion,
                 difficultyTier = DifficultyTier.Easy,
                 width = 6,

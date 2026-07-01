@@ -57,6 +57,8 @@ namespace DustBot
         public bool soundEnabled = true;
         public bool musicEnabled = true;
         public bool hapticsEnabled = true;
+        public float soundVolume = 1f;
+        public float musicVolume = 0.8f;
     }
 
     [Serializable]

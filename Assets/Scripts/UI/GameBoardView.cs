@@ -9,13 +9,15 @@ namespace DustBot
     public sealed class GameBoardView : MonoBehaviour,
         IPointerDownHandler,
         IDragHandler,
-        IPointerUpHandler
+        IPointerUpHandler,
+        IScrollHandler
     {
         private sealed class CellVisual
         {
             public RectTransform root;
             public Image background;
             public Image contentSprite;
+            public Text contentLabel;
             public Image bonusSprite;
             public Text invalidMarker;
             public Text catDangerMarker;
@@ -28,6 +30,7 @@ namespace DustBot
         private PlayerInputController input;
         private CellVisual[,] cells;
         private RectTransform boardRect;
+        private RectTransform viewportRect;
         private RectTransform routeLayer;
         private readonly List<Image> routeSegments = new List<Image>();
         private readonly List<Image> routeNodes = new List<Image>();
@@ -49,12 +52,27 @@ namespace DustBot
         private Vector2 lastPointerLocal;
         private bool hasLastProcessedCell;
         private GridPosition lastProcessedCell;
+        private bool panning;
+        private bool pinchActive;
+        private Vector2 lastPanLocal;
+        private float zoom = 1f;
+        private float minimumZoom = 1f;
+        private float overviewZoom = 1f;
+        private const float MaximumZoom = 1.75f;
 
         private void Update()
         {
             if (session == null)
             {
                 return;
+            }
+
+            HandlePinchAndTwoFingerPan();
+            if (level.largeMaze &&
+                session.State == GameSessionState.Simulating &&
+                !pinchActive)
+            {
+                FocusOnBot(7f * Time.unscaledDeltaTime);
             }
 
             float wave = Mathf.Sin(Time.unscaledTime * 2.4f);
@@ -120,7 +138,8 @@ namespace DustBot
             PlayerInputController input,
             CosmeticSystem cosmetics,
             System.Action<PathEditResult, GridPosition> onPathEdited,
-            System.Action<Direction> onCatSwipe)
+            System.Action<Direction> onCatSwipe,
+            RectTransform viewportRect = null)
         {
             if (level == null) throw new System.ArgumentNullException("level");
             if (session == null) throw new System.ArgumentNullException("session");
@@ -132,6 +151,7 @@ namespace DustBot
             this.cosmetics = cosmetics;
             this.onPathEdited = onPathEdited;
             this.onCatSwipe = onCatSwipe;
+            this.viewportRect = viewportRect;
             boardRect = (RectTransform)transform;
             cells = new CellVisual[level.width, level.height];
 
@@ -149,6 +169,36 @@ namespace DustBot
             BuildCat();
             BuildBot();
             RefreshAll();
+            ConfigureCamera();
+        }
+
+        public void AdjustZoom(float delta)
+        {
+            if (!level.largeMaze)
+            {
+                return;
+            }
+
+            SetZoom(zoom + delta);
+        }
+
+        public void ResetCamera()
+        {
+            if (!level.largeMaze)
+            {
+                return;
+            }
+
+            SetZoom(level.advancedDevMaze ? overviewZoom : 1f);
+            CenterOnCell(session != null ? session.BotPosition : level.Find(CellContent.Start));
+        }
+
+        public void OnScroll(PointerEventData eventData)
+        {
+            if (level.largeMaze)
+            {
+                SetZoom(zoom + Mathf.Sign(eventData.scrollDelta.y) * 0.12f);
+            }
         }
 
         public void RefreshAll()
@@ -191,6 +241,11 @@ namespace DustBot
                 ? cosmetics.ActiveDockTint
                 : Color.white;
 
+            string label = ContentLabel(content);
+            cell.contentLabel.text = label;
+            cell.contentLabel.color = ContentLabelColor(content);
+            cell.contentLabel.gameObject.SetActive(!contentVisible && !string.IsNullOrEmpty(label));
+
             bool hasBonus = level.objectives.collectBonus &&
                             position == level.bonusPosition &&
                             !session.CollectedBonus;
@@ -227,6 +282,11 @@ namespace DustBot
 
         public void OnPointerDown(PointerEventData eventData)
         {
+            if (level.largeMaze && Input.touchCount >= 2)
+            {
+                return;
+            }
+
             if (session.HasCat &&
                 session.State == GameSessionState.CatTurn)
             {
@@ -256,14 +316,31 @@ namespace DustBot
                 return;
             }
 
+            if (level.largeMaze && !session.IsPathCell(position))
+            {
+                Vector2 viewportLocal;
+                if (TryGetViewportLocal(
+                        eventData.position,
+                        eventData.pressEventCamera,
+                        out viewportLocal))
+                {
+                    panning = true;
+                    lastPanLocal = viewportLocal;
+                }
+
+                return;
+            }
+
             PathEditResult result = input.BeginPath(position);
-            drawing = result == PathEditResult.Started;
+            drawing = result == PathEditResult.Started ||
+                      result == PathEditResult.Resumed ||
+                      result == PathEditResult.Trimmed;
             hasLastPointerLocal = drawing;
             lastPointerLocal = local;
             hasLastProcessedCell = true;
             lastProcessedCell = position;
 
-            if (result == PathEditResult.Started)
+            if (drawing)
             {
                 RefreshAll();
                 PlayTileFeedback(position);
@@ -282,6 +359,21 @@ namespace DustBot
 
         public void OnDrag(PointerEventData eventData)
         {
+            if (panning)
+            {
+                Vector2 viewportLocal;
+                if (TryGetViewportLocal(
+                        eventData.position,
+                        eventData.pressEventCamera,
+                        out viewportLocal))
+                {
+                    PanBy(viewportLocal - lastPanLocal);
+                    lastPanLocal = viewportLocal;
+                }
+
+                return;
+            }
+
             if (session.HasCat)
             {
                 return;
@@ -291,6 +383,8 @@ namespace DustBot
             {
                 return;
             }
+
+            AutoPanNearViewportEdge(eventData.position, eventData.pressEventCamera);
 
             Vector2 local;
             if (!RectTransformUtility.ScreenPointToLocalPointInRectangle(
@@ -330,6 +424,12 @@ namespace DustBot
 
         public void OnPointerUp(PointerEventData eventData)
         {
+            if (panning)
+            {
+                panning = false;
+                return;
+            }
+
             if (catSwipeStarted)
             {
                 catSwipeStarted = false;
@@ -635,6 +735,187 @@ namespace DustBot
             botImage.color = originalColor;
         }
 
+        private void ConfigureCamera()
+        {
+            if (!level.largeMaze || viewportRect == null)
+            {
+                return;
+            }
+
+            Canvas.ForceUpdateCanvases();
+            float fitX = viewportRect.rect.width / Mathf.Max(1f, boardRect.rect.width);
+            float fitY = viewportRect.rect.height / Mathf.Max(1f, boardRect.rect.height);
+            minimumZoom = Mathf.Clamp(Mathf.Min(1f, fitX, fitY), 0.55f, 1f);
+            overviewZoom = level.advancedDevMaze
+                ? Mathf.Clamp(
+                    18f / Mathf.Max(level.width, level.height),
+                    minimumZoom,
+                    1f)
+                : 1f;
+            zoom = overviewZoom;
+            boardRect.localScale = Vector3.one * zoom;
+            CenterOnCell(session.BotPosition);
+        }
+
+        private void HandlePinchAndTwoFingerPan()
+        {
+            if (!level.largeMaze || viewportRect == null || Input.touchCount < 2)
+            {
+                pinchActive = false;
+                return;
+            }
+
+            Touch first = Input.GetTouch(0);
+            Touch second = Input.GetTouch(1);
+            if (first.phase == TouchPhase.Ended || second.phase == TouchPhase.Ended ||
+                first.phase == TouchPhase.Canceled || second.phase == TouchPhase.Canceled)
+            {
+                pinchActive = false;
+                return;
+            }
+
+            if (drawing)
+            {
+                input.EndPath();
+                drawing = false;
+                hasLastPointerLocal = false;
+                hasLastProcessedCell = false;
+            }
+
+            panning = false;
+            pinchActive = true;
+            Vector2 firstPrevious = first.position - first.deltaPosition;
+            Vector2 secondPrevious = second.position - second.deltaPosition;
+            float previousDistance = Vector2.Distance(firstPrevious, secondPrevious);
+            float currentDistance = Vector2.Distance(first.position, second.position);
+            Vector2 currentMidpoint = (first.position + second.position) * 0.5f;
+            Vector2 previousMidpoint = (firstPrevious + secondPrevious) * 0.5f;
+            Vector2 currentLocal;
+            Vector2 previousLocal;
+            if (TryGetViewportLocal(currentMidpoint, null, out currentLocal) &&
+                TryGetViewportLocal(previousMidpoint, null, out previousLocal))
+            {
+                PanBy(currentLocal - previousLocal);
+            }
+
+            if (previousDistance > 1f)
+            {
+                SetZoom(zoom * currentDistance / previousDistance);
+            }
+        }
+
+        private void AutoPanNearViewportEdge(Vector2 screenPosition, Camera eventCamera)
+        {
+            if (!level.largeMaze || viewportRect == null)
+            {
+                return;
+            }
+
+            Vector2 local;
+            if (!TryGetViewportLocal(screenPosition, eventCamera, out local))
+            {
+                return;
+            }
+
+            Rect rect = viewportRect.rect;
+            float edge = Mathf.Min(76f, Mathf.Min(rect.width, rect.height) * 0.14f);
+            Vector2 delta = Vector2.zero;
+            if (local.x > rect.xMax - edge) delta.x = -18f;
+            else if (local.x < rect.xMin + edge) delta.x = 18f;
+            if (local.y > rect.yMax - edge) delta.y = -18f;
+            else if (local.y < rect.yMin + edge) delta.y = 18f;
+            if (delta.sqrMagnitude > 0f)
+            {
+                PanBy(delta);
+            }
+        }
+
+        private bool TryGetViewportLocal(
+            Vector2 screenPosition,
+            Camera eventCamera,
+            out Vector2 local)
+        {
+            local = Vector2.zero;
+            return viewportRect != null &&
+                   RectTransformUtility.ScreenPointToLocalPointInRectangle(
+                       viewportRect,
+                       screenPosition,
+                       eventCamera,
+                       out local);
+        }
+
+        private void SetZoom(float value)
+        {
+            if (!level.largeMaze || viewportRect == null)
+            {
+                return;
+            }
+
+            zoom = Mathf.Clamp(value, minimumZoom, MaximumZoom);
+            boardRect.localScale = Vector3.one * zoom;
+            ClampBoardPosition();
+        }
+
+        private void PanBy(Vector2 delta)
+        {
+            if (!level.largeMaze || viewportRect == null)
+            {
+                return;
+            }
+
+            boardRect.anchoredPosition += delta;
+            ClampBoardPosition();
+        }
+
+        private void CenterOnCell(GridPosition position)
+        {
+            if (!level.largeMaze || viewportRect == null || !level.IsInside(position))
+            {
+                return;
+            }
+
+            boardRect.anchoredPosition = -LocalCenterFor(position) * zoom;
+            ClampBoardPosition();
+        }
+
+        private void FocusOnBot(float interpolation)
+        {
+            if (viewportRect == null || bot == null)
+            {
+                return;
+            }
+
+            Rect rect = boardRect.rect;
+            Vector2 botLocal = new Vector2(
+                rect.xMin + bot.anchorMin.x * rect.width,
+                rect.yMin + bot.anchorMin.y * rect.height);
+            Vector2 target = -botLocal * zoom;
+            boardRect.anchoredPosition = Vector2.Lerp(
+                boardRect.anchoredPosition,
+                target,
+                Mathf.Clamp01(interpolation));
+            ClampBoardPosition();
+        }
+
+        private void ClampBoardPosition()
+        {
+            if (viewportRect == null)
+            {
+                return;
+            }
+
+            float excessX = Mathf.Max(
+                0f,
+                (boardRect.rect.width * zoom - viewportRect.rect.width) * 0.5f);
+            float excessY = Mathf.Max(
+                0f,
+                (boardRect.rect.height * zoom - viewportRect.rect.height) * 0.5f);
+            Vector2 position = boardRect.anchoredPosition;
+            position.x = excessX <= 0f ? 0f : Mathf.Clamp(position.x, -excessX, excessX);
+            position.y = excessY <= 0f ? 0f : Mathf.Clamp(position.y, -excessY, excessY);
+            boardRect.anchoredPosition = position;
+        }
+
         private void BuildCells()
         {
             for (int y = 0; y < level.height; y++)
@@ -645,8 +926,11 @@ namespace DustBot
                     RectTransform rootRect = root.GetComponent<RectTransform>();
                     rootRect.anchorMin = new Vector2((float)x / level.width, (float)y / level.height);
                     rootRect.anchorMax = new Vector2((float)(x + 1) / level.width, (float)(y + 1) / level.height);
-                    rootRect.offsetMin = new Vector2(5f, 5f);
-                    rootRect.offsetMax = new Vector2(-5f, -5f);
+                    float gutter = level.advancedDevMaze
+                        ? level.width >= 22 || level.height >= 22 ? 2.25f : 1.9f
+                        : level.largeMaze ? 1.75f : 5f;
+                    rootRect.offsetMin = new Vector2(gutter, gutter);
+                    rootRect.offsetMax = new Vector2(-gutter, -gutter);
 
                     Image background = root.AddComponent<Image>();
                     background.sprite = SpriteFactory.RoundedRect;
@@ -655,10 +939,13 @@ namespace DustBot
                         ? cosmetics.ActiveTileA
                         : cosmetics.ActiveTileB;
                     background.raycastTarget = false;
-                    Outline tileEdge = root.AddComponent<Outline>();
-                    tileEdge.effectColor = new Color(1f, 1f, 1f, 0.44f);
-                    tileEdge.effectDistance = new Vector2(1.5f, -1.5f);
-                    tileEdge.useGraphicAlpha = true;
+                    if (!level.largeMaze)
+                    {
+                        Outline tileEdge = root.AddComponent<Outline>();
+                        tileEdge.effectColor = new Color(1f, 1f, 1f, 0.44f);
+                        tileEdge.effectDistance = new Vector2(1.5f, -1.5f);
+                        tileEdge.useGraphicAlpha = true;
+                    }
 
                     GameObject contentObject = UIFactory.CreateUIObject("Object Sprite", root.transform);
                     Image contentSprite = contentObject.AddComponent<Image>();
@@ -666,14 +953,38 @@ namespace DustBot
                     contentSprite.raycastTarget = false;
                     UIFactory.SetAnchors(
                         contentSprite.rectTransform,
-                        new Vector2(0.1f, 0.1f),
-                        new Vector2(0.9f, 0.9f),
+                        level.largeMaze ? new Vector2(0.04f, 0.04f) : new Vector2(0.1f, 0.1f),
+                        level.largeMaze ? new Vector2(0.96f, 0.96f) : new Vector2(0.9f, 0.9f),
                         Vector2.zero,
                         Vector2.zero);
-                    Shadow objectShadow = contentObject.AddComponent<Shadow>();
-                    objectShadow.effectColor = new Color(0.12f, 0.09f, 0.06f, 0.2f);
-                    objectShadow.effectDistance = new Vector2(0f, -3f);
-                    objectShadow.useGraphicAlpha = true;
+                    if (!level.largeMaze)
+                    {
+                        Shadow objectShadow = contentObject.AddComponent<Shadow>();
+                        objectShadow.effectColor = new Color(0.12f, 0.09f, 0.06f, 0.2f);
+                        objectShadow.effectDistance = new Vector2(0f, -3f);
+                        objectShadow.useGraphicAlpha = true;
+                    }
+
+                    Text contentLabel = UIFactory.CreateText(
+                        "Tile Symbol",
+                        root.transform,
+                        string.Empty,
+                        46,
+                        DustBotTheme.Ink);
+                    contentLabel.fontStyle = FontStyle.Bold;
+                    contentLabel.resizeTextForBestFit = true;
+                    contentLabel.resizeTextMinSize = 22;
+                    contentLabel.resizeTextMaxSize = 54;
+                    UIFactory.SetAnchors(
+                        contentLabel.rectTransform,
+                        new Vector2(0.13f, 0.12f),
+                        new Vector2(0.87f, 0.88f),
+                        Vector2.zero,
+                        Vector2.zero);
+                    Outline symbolOutline = contentLabel.gameObject.AddComponent<Outline>();
+                    symbolOutline.effectColor = new Color(1f, 1f, 1f, 0.82f);
+                    symbolOutline.effectDistance = new Vector2(2f, -2f);
+                    contentLabel.gameObject.SetActive(false);
 
                     GameObject bonusObject = UIFactory.CreateUIObject("Bonus Dust Bunny", root.transform);
                     Image bonusSprite = bonusObject.AddComponent<Image>();
@@ -682,14 +993,17 @@ namespace DustBot
                     bonusSprite.raycastTarget = false;
                     UIFactory.SetAnchors(
                         bonusSprite.rectTransform,
-                        new Vector2(0.56f, 0.55f),
+                        level.largeMaze ? new Vector2(0.44f, 0.44f) : new Vector2(0.56f, 0.55f),
                         new Vector2(0.98f, 0.98f),
                         Vector2.zero,
                         Vector2.zero);
-                    Shadow bonusShadow = bonusObject.AddComponent<Shadow>();
-                    bonusShadow.effectColor = new Color(0.15f, 0.1f, 0.2f, 0.2f);
-                    bonusShadow.effectDistance = new Vector2(0f, -3f);
-                    bonusShadow.useGraphicAlpha = true;
+                    if (!level.largeMaze)
+                    {
+                        Shadow bonusShadow = bonusObject.AddComponent<Shadow>();
+                        bonusShadow.effectColor = new Color(0.15f, 0.1f, 0.2f, 0.2f);
+                        bonusShadow.effectDistance = new Vector2(0f, -3f);
+                        bonusShadow.useGraphicAlpha = true;
+                    }
 
                     Text invalidMarker = UIFactory.CreateText(
                         "Invalid X",
@@ -737,6 +1051,7 @@ namespace DustBot
                         root = rootRect,
                         background = background,
                         contentSprite = contentSprite,
+                        contentLabel = contentLabel,
                         bonusSprite = bonusSprite,
                         invalidMarker = invalidMarker,
                         catDangerMarker = catDangerMarker,
@@ -770,8 +1085,13 @@ namespace DustBot
             shadow.effectColor = new Color(0.05f, 0.12f, 0.1f, 0.28f);
             shadow.effectDistance = new Vector2(0f, -6f);
             bot = botObject.GetComponent<RectTransform>();
-            float cellWidth = Mathf.Min(920f / level.width, 970f / level.height);
-            bot.sizeDelta = Vector2.one * Mathf.Clamp(cellWidth * 0.78f, 58f, 128f);
+            float cellWidth = Mathf.Min(
+                boardRect.rect.width / level.width,
+                boardRect.rect.height / level.height);
+            bot.sizeDelta = Vector2.one * Mathf.Clamp(
+                cellWidth * 0.78f,
+                level.largeMaze ? 42f : 58f,
+                128f);
             bot.pivot = new Vector2(0.5f, 0.5f);
         }
 
@@ -825,7 +1145,9 @@ namespace DustBot
             float cellWidth = boardRect.rect.width / level.width;
             float cellHeight = boardRect.rect.height / level.height;
             float shortestCell = Mathf.Min(cellWidth, cellHeight);
-            float thickness = Mathf.Clamp(shortestCell * 0.14f, 10f, 25f);
+            float thickness = level.advancedDevMaze
+                ? Mathf.Clamp(shortestCell * 0.18f, 14f, 30f)
+                : Mathf.Clamp(shortestCell * 0.14f, 10f, 25f);
             Color routeColor = session.State == GameSessionState.Editing
                 ? session.CanStillEarnThreeStars
                     ? cosmetics.ActivePathColor
@@ -930,11 +1252,23 @@ namespace DustBot
 
             hasLastProcessedCell = true;
             lastProcessedCell = position;
+            GridPosition previousTail = session.CurrentPathCells.Count > 0
+                ? session.CurrentPathCells[session.CurrentPathCells.Count - 1]
+                : position;
             PathEditResult result = input.ContinuePath(position);
             if (result == PathEditResult.Added ||
                 result == PathEditResult.Backtracked)
             {
-                RefreshAll();
+                if (level.largeMaze)
+                {
+                    RefreshCell(previousTail);
+                    RefreshCell(position);
+                    RefreshPath();
+                }
+                else
+                {
+                    RefreshAll();
+                }
                 PlayTileFeedback(position);
             }
             else if (result == PathEditResult.Invalid)
@@ -1451,6 +1785,37 @@ namespace DustBot
             }
         }
 
+        private static string ContentLabel(CellContent content)
+        {
+            switch (content)
+            {
+                case CellContent.Sticky: return "2";
+                case CellContent.Fragile: return "◇";
+                case CellContent.Slippery: return "≈";
+                case CellContent.OneWayUp: return "↑";
+                case CellContent.OneWayRight: return "→";
+                case CellContent.OneWayDown: return "↓";
+                case CellContent.OneWayLeft: return "←";
+                default: return string.Empty;
+            }
+        }
+
+        private static Color ContentLabelColor(CellContent content)
+        {
+            switch (content)
+            {
+                case CellContent.Sticky: return DustBotTheme.MintDark;
+                case CellContent.Fragile: return DustBotTheme.Blue;
+                case CellContent.Slippery: return DustBotTheme.Blue;
+                case CellContent.OneWayUp:
+                case CellContent.OneWayRight:
+                case CellContent.OneWayDown:
+                case CellContent.OneWayLeft:
+                    return DustBotTheme.Warning;
+                default: return DustBotTheme.Ink;
+            }
+        }
+
         private static Color TileColor(CellContent content, Color floorColor)
         {
             switch (content)
@@ -1468,6 +1833,17 @@ namespace DustBot
                     return Color.Lerp(floorColor, DustBotTheme.Yellow, 0.26f);
                 case CellContent.WetSpot:
                     return Color.Lerp(floorColor, DustBotTheme.Blue, 0.24f);
+                case CellContent.Sticky:
+                    return Color.Lerp(floorColor, DustBotTheme.Mint, 0.2f);
+                case CellContent.Fragile:
+                    return Color.Lerp(floorColor, DustBotTheme.Blue, 0.18f);
+                case CellContent.Slippery:
+                    return Color.Lerp(floorColor, DustBotTheme.Blue, 0.28f);
+                case CellContent.OneWayUp:
+                case CellContent.OneWayRight:
+                case CellContent.OneWayDown:
+                case CellContent.OneWayLeft:
+                    return Color.Lerp(floorColor, DustBotTheme.Yellow, 0.2f);
                 default:
                     return floorColor;
             }

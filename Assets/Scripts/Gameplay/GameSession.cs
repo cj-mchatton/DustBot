@@ -63,6 +63,7 @@ namespace DustBot
         private readonly Stack<List<GridPosition>> undoStack = new Stack<List<GridPosition>>();
         private readonly HashSet<GridPosition> remainingCrumbs = new HashSet<GridPosition>();
         private readonly HashSet<SimulationVisit> visits = new HashSet<SimulationVisit>();
+        private readonly HashSet<GridPosition> crossedFragile = new HashSet<GridPosition>();
         private int simulationPathIndex;
         private int catTurn;
         private bool isDrawing;
@@ -83,6 +84,7 @@ namespace DustBot
         public bool IsDrawing { get { return isDrawing; } }
         public IReadOnlyList<GridPosition> CurrentPathCells { get { return currentPathCells; } }
         public int CurrentPathLength { get { return Math.Max(0, currentPathCells.Count - 1); } }
+        public int CurrentPathMoveCost { get { return CalculatePathMoveCost(currentPathCells); } }
         public int PlannedCrumbsRemaining
         {
             get
@@ -129,6 +131,7 @@ namespace DustBot
                     PlannedBonusCollected ||
                     !routeFinished;
                 return CurrentPathLength <= Level.threeStarMoveTarget &&
+                       CurrentPathMoveCost <= Level.threeStarMoveTarget &&
                        (!Level.objectives.noHintStar || !UsedHint) &&
                        (!Level.objectives.noUndoStar || !UsedUndo) &&
                        bonusPossible;
@@ -183,19 +186,33 @@ namespace DustBot
 
         public PathEditResult BeginPath(GridPosition position)
         {
-            if (State != GameSessionState.Editing || position != Grid.Start)
+            if (State != GameSessionState.Editing || !Grid.IsInside(position))
             {
                 return PathEditResult.Invalid;
             }
 
-            if (currentPathCells.Count > 1)
+            int pathIndex = currentPathCells.IndexOf(position);
+            if (pathIndex < 0)
             {
-                SaveUndoSnapshot();
-                currentPathCells.RemoveRange(1, currentPathCells.Count - 1);
+                return PathEditResult.Invalid;
             }
 
             isDrawing = true;
-            return PathEditResult.Started;
+            if (currentPathCells.Count == 1)
+            {
+                return PathEditResult.Started;
+            }
+
+            if (pathIndex == currentPathCells.Count - 1)
+            {
+                return PathEditResult.Resumed;
+            }
+
+            SaveUndoSnapshot();
+            currentPathCells.RemoveRange(
+                pathIndex + 1,
+                currentPathCells.Count - pathIndex - 1);
+            return PathEditResult.Trimmed;
         }
 
         public PathEditResult TryExtendPath(GridPosition position)
@@ -220,7 +237,8 @@ namespace DustBot
             }
 
             if (DirectionUtility.Between(tail, position) == Direction.None ||
-                !Grid.CanDrawThrough(position) ||
+                !Grid.CanDrawMove(tail, position) ||
+                ViolatesSlipperyMomentum(currentPathCells, position) ||
                 currentPathCells.Contains(position) ||
                 Grid.GetContent(tail) == CellContent.Dock)
             {
@@ -229,7 +247,7 @@ namespace DustBot
 
             if (Level.hardPathLimit &&
                 Level.moveLimit > 0 &&
-                CurrentPathLength >= Level.moveLimit)
+                CurrentPathMoveCost + Grid.MoveCost(position) > Level.moveLimit)
             {
                 return PathEditResult.LimitReached;
             }
@@ -354,9 +372,20 @@ namespace DustBot
                 }
 
                 if (i > 0 &&
-                    DirectionUtility.Between(currentPathCells[i - 1], position) == Direction.None)
+                    !Grid.CanDrawMove(currentPathCells[i - 1], position))
                 {
-                    issue = "The route must stay on neighboring tiles.";
+                    issue = "The route must stay on neighboring tiles and follow one-way arrows.";
+                    return true;
+                }
+
+                if (i > 1 &&
+                    Grid.GetContent(currentPathCells[i - 1]) == CellContent.Slippery &&
+                    DirectionUtility.Between(
+                        currentPathCells[i - 2],
+                        currentPathCells[i - 1]) !=
+                    DirectionUtility.Between(currentPathCells[i - 1], position))
+                {
+                    issue = "Slippery tiles must be crossed straight without turning.";
                     return true;
                 }
             }
@@ -369,9 +398,9 @@ namespace DustBot
 
             if (Level.hardPathLimit &&
                 Level.moveLimit > 0 &&
-                CurrentPathLength > Level.moveLimit)
+                CurrentPathMoveCost > Level.moveLimit)
             {
-                issue = "Route exceeds the maximum path length of " + Level.moveLimit + ".";
+                issue = "Route cost exceeds the maximum of " + Level.moveLimit + ". Sticky tiles count extra.";
                 return true;
             }
 
@@ -438,12 +467,12 @@ namespace DustBot
             }
 
             CellContent content = Grid.GetContent(next);
-            if (content == CellContent.Wall || content == CellContent.Toy)
+            if (!CanAttemptDustBotMove(BotPosition, next))
             {
                 return false;
             }
 
-            Moves++;
+            Moves += Grid.MoveCost(next);
             BotPosition = next;
             outcome.to = next;
             outcome.moved = true;
@@ -470,6 +499,12 @@ namespace DustBot
             if (content == CellContent.WetSpot)
             {
                 outcome = Fail(outcome, FailureReason.WetSpotSlip);
+                return true;
+            }
+
+            if (content == CellContent.Fragile && !crossedFragile.Add(next))
+            {
+                outcome = Fail(outcome, FailureReason.FragileBreak);
                 return true;
             }
 
@@ -555,7 +590,7 @@ namespace DustBot
             }
 
             CellContent content = Grid.GetContent(destination);
-            if (content == CellContent.Wall || content == CellContent.Toy)
+            if (!CanAttemptDustBotMove(BotPosition, destination))
             {
                 return false;
             }
@@ -569,11 +604,13 @@ namespace DustBot
             if (content == CellContent.Sock) danger = FailureReason.SockJam;
             if (content == CellContent.Cord) danger = FailureReason.CordZap;
             if (content == CellContent.WetSpot) danger = FailureReason.WetSpotSlip;
+            if (content == CellContent.Fragile && crossedFragile.Contains(destination))
+                danger = FailureReason.FragileBreak;
             if (content == CellContent.Dock && remainingCrumbs.Count > 0)
                 danger = FailureReason.ReturnedTooEarly;
             if (Level.hardPathLimit &&
                 Level.moveLimit > 0 &&
-                Moves + 1 >= Level.moveLimit &&
+                Moves + Grid.MoveCost(destination) >= Level.moveLimit &&
                 !(content == CellContent.Dock && remainingCrumbs.Count == 0))
                 danger = FailureReason.OutOfMoves;
             if (danger != FailureReason.None)
@@ -625,7 +662,6 @@ namespace DustBot
 
             outcome.direction = direction;
             outcome.to = next;
-            Moves++;
 
             if (!Grid.IsInside(next))
             {
@@ -633,11 +669,17 @@ namespace DustBot
             }
 
             CellContent content = Grid.GetContent(next);
-            if (content == CellContent.Wall || content == CellContent.Toy)
+            if (content == CellContent.Wall ||
+                content == CellContent.Toy ||
+                !CellContentUtility.AllowsDirection(
+                    Grid.GetContent(BotPosition),
+                    content,
+                    direction))
             {
                 return Fail(outcome, FailureReason.WallBump);
             }
 
+            Moves += Grid.MoveCost(next);
             BotPosition = next;
             simulationPathIndex++;
             outcome.moved = true;
@@ -655,6 +697,11 @@ namespace DustBot
             if (content == CellContent.WetSpot)
             {
                 return Fail(outcome, FailureReason.WetSpotSlip);
+            }
+
+            if (content == CellContent.Fragile && !crossedFragile.Add(next))
+            {
+                return Fail(outcome, FailureReason.FragileBreak);
             }
 
             if (remainingCrumbs.Remove(next))
@@ -871,6 +918,7 @@ namespace DustBot
             }
 
             visits.Clear();
+            crossedFragile.Clear();
         }
 
         private StepOutcome Fail(StepOutcome outcome, FailureReason reason)
@@ -879,6 +927,56 @@ namespace DustBot
             State = GameSessionState.Failed;
             outcome.failure = reason;
             return outcome;
+        }
+
+        private bool CanAttemptDustBotMove(GridPosition from, GridPosition to)
+        {
+            if (!Grid.IsInside(from) || !Grid.IsInside(to))
+            {
+                return false;
+            }
+
+            CellContent destination = Grid.GetContent(to);
+            if (destination == CellContent.Wall || destination == CellContent.Toy)
+            {
+                return false;
+            }
+
+            return CellContentUtility.AllowsDirection(
+                Grid.GetContent(from),
+                destination,
+                DirectionUtility.Between(from, to));
+        }
+
+        private int CalculatePathMoveCost(IList<GridPosition> path)
+        {
+            if (path == null || path.Count < 2)
+            {
+                return 0;
+            }
+
+            int cost = 0;
+            for (int i = 1; i < path.Count; i++)
+            {
+                cost += Grid.MoveCost(path[i]);
+            }
+
+            return cost;
+        }
+
+        private bool ViolatesSlipperyMomentum(
+            IList<GridPosition> path,
+            GridPosition next)
+        {
+            if (path == null || path.Count < 2)
+            {
+                return false;
+            }
+
+            GridPosition tail = path[path.Count - 1];
+            return Grid.GetContent(tail) == CellContent.Slippery &&
+                   DirectionUtility.Between(path[path.Count - 2], tail) !=
+                   DirectionUtility.Between(tail, next);
         }
     }
 }

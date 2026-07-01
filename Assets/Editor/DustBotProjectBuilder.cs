@@ -74,8 +74,11 @@ namespace DustBot.Editor
                 ValidateAndSimulate(loader.LoadMain(i), "Tutorial " + i);
             }
 
-            int[] deterministicChecks = { 16, 20, 30, 45, 50, 100, 180, 500, 1000, 2000, 4000, 6000 };
+            int[] deterministicChecks = { 10, 15, 21, 30, 36, 45, 50, 100, 180, 500, 1000, 2000, 4000, 6000 };
             int catLevelCount = 0;
+            int largeMazeLevelCount = 0;
+            int postIntroCatLevels = 0;
+            int postIntroLevels = 0;
             for (int number = LevelManifest.TutorialLevelCount + 1;
                  number <= LevelManifest.MainJourneyLevelCount;
                  number++)
@@ -89,11 +92,19 @@ namespace DustBot.Editor
                         "Main level " + number + " was not deterministic.");
                 }
 
-                if (number > 25 && number != 30)
+                if (number > 12 && number != 21)
                 {
                     LevelEngagementReport engagement = LevelEngagementEvaluator.Analyze(first);
                     Require(!engagement.tooTrivial, "Main level " + number + " was accepted as trivial.");
                     Require(!engagement.tooDense, "Main level " + number + " was accepted as overly dense.");
+                    Require(
+                        engagement.strategicDepthScore >= 18,
+                        "Main level " + number + " strategic depth was too low.");
+                }
+
+                if (number >= 36)
+                {
+                    postIntroLevels++;
                 }
 
                 if (first.generationVersion >= 4)
@@ -118,6 +129,11 @@ namespace DustBot.Editor
                 if (first.cat != null && first.cat.IsEnabled)
                 {
                     catLevelCount++;
+                    if (number >= 36)
+                    {
+                        postIntroCatLevels++;
+                    }
+
                     List<GridPosition> catRoute = CatObstacleSimulator.BuildExpectedRoute(first);
                     CatRoutePreview preview = CatObstacleSimulator.SimulateRoute(
                         first,
@@ -140,12 +156,33 @@ namespace DustBot.Editor
                             relevance.pressureTurns));
                 }
 
+                if (first.largeMaze)
+                {
+                    largeMazeLevelCount++;
+                    LargeMazeComplexityReport maze = LargeMazeEvaluator.Analyze(first);
+                    Require(
+                        maze.allObjectivesReachable &&
+                        !maze.tooOpen &&
+                        !maze.tooLinear &&
+                        maze.branches >= 3 &&
+                        maze.deadEnds >= 3 &&
+                        maze.loops >= 2,
+                        "Main level " + number + " failed the large-maze topology audit.");
+                }
+
                 ValidateAndSimulate(first, "Main " + number);
             }
 
-            Require(catLevelCount >= 500, "Too few canonical levels use the cat mechanic.");
+            Require(catLevelCount >= 500, "Too few canonical levels retain the cat mechanic.");
             Require(
-                loader.LoadMain(30).cat.behavior == CatBehavior.Curious,
+                postIntroCatLevels * 10 >= postIntroLevels &&
+                postIntroCatLevels * 4 <= postIntroLevels,
+                "Post-introduction cat frequency is outside the expected 10-25% band after adding large path mazes.");
+            Require(
+                largeMazeLevelCount >= 4000,
+                "Too few canonical levels use the large-maze path system.");
+            Require(
+                loader.LoadMain(21).cat.behavior == CatBehavior.Curious,
                 "The Curious Cat introduction level is missing.");
 
             DateTime date = new DateTime(2026, 6, 22);
@@ -156,10 +193,22 @@ namespace DustBot.Editor
                 "Daily challenge was not deterministic.");
             LevelEngagementReport dailyEngagement = LevelEngagementEvaluator.Analyze(dailyA);
             Require(dailyA.objectives.collectBonus, "Daily challenge did not include a Dust Bunny.");
-            Require(dailyA.Count(CellContent.Crumb) >= 4, "Daily challenge did not include enough crumbs.");
+            if (dailyA.cat != null && dailyA.cat.IsEnabled)
+            {
+                Require(
+                    dailyEngagement.catPressureScore >= 8,
+                    "Daily cat challenge did not create enough cat pressure.");
+                Require(
+                    dailyA.Count(CellContent.Crumb) >= 1,
+                    "Daily cat challenge did not include a cleaning objective.");
+            }
+            else
+            {
+                Require(dailyA.Count(CellContent.Crumb) >= 4, "Daily challenge did not include enough crumbs.");
+                Require(dailyEngagement.bonusDetourCost >= 2, "Daily Dust Bunny was not a real detour.");
+            }
             Require(dailyEngagement.score >= 38, "Daily challenge engagement score was too low.");
-            Require(dailyEngagement.turns >= 8, "Daily challenge route did not require enough planning.");
-            Require(dailyEngagement.bonusDetourCost >= 2, "Daily Dust Bunny was not a real detour.");
+            Require(dailyEngagement.turns >= 6, "Daily challenge route did not require enough planning.");
             Require(dailyA.hardPathLimit, "Daily challenge did not enforce a hard path limit.");
             ValidateAndSimulate(dailyA, "Daily 2026-06-22");
 
@@ -172,13 +221,26 @@ namespace DustBot.Editor
             ValidateAndSimulate(masterA, "Master 500");
 
             ValidateHazardBlocking(loader.LoadMain(7));
-            ValidateCatTurnMechanic(loader.LoadMain(30));
+            ValidateCatTurnMechanic(loader.LoadMain(21));
+            ValidateDevelopmentModes(loader);
             ValidateProgression();
             Debug.Log(
                 "DUSTBOT_VALIDATION_PASSED: 6,000 canonical journey levels, " +
                 catLevelCount +
-                " deterministic cat levels, engagement pacing, archetypes, tutorials, " +
+                " deterministic cat levels, " +
+                largeMazeLevelCount +
+                " large mazes, engagement pacing, archetypes, tutorials, " +
                 "daily, master, economy claims, cosmetics, route simulation, hazards, and progression.");
+        }
+
+        [MenuItem("DustBot/Run Development Mode Validation")]
+        public static void RunDevelopmentModeValidation()
+        {
+            LevelLoader loader = new LevelLoader();
+            ValidateDevelopmentModes(loader);
+            Debug.Log(
+                "DUSTBOT_DEVELOPMENT_MODES_PASSED: deterministic 30-level development, " +
+                "24-level cat, 18-level obstacle, 8-level tutorial, and 20-level maze playlists.");
         }
 
         [MenuItem("DustBot/Audit Cat Relevance")]
@@ -370,6 +432,142 @@ namespace DustBot.Editor
             }
 
             Require(session.State == GameSessionState.Won, label + " expected route did not win.");
+        }
+
+        private static void ValidateDevelopmentModes(LevelLoader loader)
+        {
+            Require(
+                LevelValidator.Signature(loader.LoadMain(21)) ==
+                LevelValidator.Signature(loader.LoadCampaign(GenerationMode.ProductionCampaign, 21)),
+                "Production campaign loading changed when the mode system was added.");
+
+            GenerationMode[] modes =
+            {
+                GenerationMode.DevelopmentCampaign,
+                GenerationMode.CatTesting,
+                GenerationMode.ObstacleTesting,
+                GenerationMode.TutorialTesting,
+                GenerationMode.MazeTesting
+            };
+            for (int modeIndex = 0; modeIndex < modes.Length; modeIndex++)
+            {
+                GenerationMode mode = modes[modeIndex];
+                int count = LevelGenerationConfig.LevelCount(mode);
+                int cats = 0;
+                int slipperyTiles = 0;
+                for (int number = 1; number <= count; number++)
+                {
+                    LevelDefinition first = loader.LoadCampaign(mode, number);
+                    LevelDefinition second = loader.LoadCampaign(mode, number);
+                    Require(first.generationMode == mode, mode + " level has incorrect metadata.");
+                    Require(
+                        LevelValidator.Signature(first) == LevelValidator.Signature(second),
+                        mode + " level " + number + " was not deterministic.");
+                    ValidateAndSimulate(first, mode + " " + number);
+                    if (first.cat != null && first.cat.IsEnabled)
+                    {
+                        cats++;
+                    }
+                    slipperyTiles += first.Count(CellContent.Slippery);
+
+                    if (mode == GenerationMode.DevelopmentCampaign)
+                    {
+                        if (number <= 15)
+                        {
+                            Require(!first.cat.IsEnabled, "Development path level unexpectedly used a cat.");
+                        }
+                        if (number >= 16 && number <= 27)
+                        {
+                            Require(first.cat.IsEnabled, "Development cat block omitted a cat.");
+                        }
+                        if (number == 9)
+                            Require(first.largeMaze && first.advancedDevMaze &&
+                                    first.width == 12 && first.height == 12,
+                                "Development medium large-maze test is missing.");
+                        if (number == 12)
+                            Require(first.largeMaze && first.width == 18 && first.height == 18,
+                                "Development hard large-maze test is missing.");
+                        if (number == 28)
+                            Require(first.largeMaze && first.width == 28 && first.height == 28,
+                                "Development expert large-maze test is missing.");
+                        if (number == 29)
+                            Require(first.dailyChallengeStyle && first.largeMaze,
+                                "Development daily-style large-maze test is missing.");
+                        if (number == 30)
+                            Require(first.masterCleanStyle && first.largeMaze &&
+                                    first.width >= 31 && first.height >= 31,
+                                "Development Master Clean large-maze test is missing.");
+                    }
+
+                    if (mode == GenerationMode.ObstacleTesting)
+                    {
+                        int modifierCount =
+                            first.Count(CellContent.Sticky) +
+                            first.Count(CellContent.Fragile) +
+                            first.Count(CellContent.OneWayUp) +
+                            first.Count(CellContent.OneWayRight) +
+                            first.Count(CellContent.OneWayDown) +
+                            first.Count(CellContent.OneWayLeft);
+                        Require(modifierCount > 0, "Obstacle test " + number + " has no route modifier.");
+                        if (number <= 6)
+                            Require(first.Count(CellContent.Sticky) > 0, "Sticky test omitted sticky tiles.");
+                        else if (number <= 12)
+                            Require(
+                                first.Count(CellContent.OneWayUp) + first.Count(CellContent.OneWayRight) +
+                                first.Count(CellContent.OneWayDown) + first.Count(CellContent.OneWayLeft) > 0,
+                                "One-way test omitted one-way tiles.");
+                        else if (number <= 16)
+                            Require(first.Count(CellContent.Fragile) > 0, "Fragile test omitted fragile tiles.");
+                        else
+                        {
+                            int kinds = first.Count(CellContent.Sticky) > 0 ? 1 : 0;
+                            kinds += first.Count(CellContent.Fragile) > 0 ? 1 : 0;
+                            kinds += first.Count(CellContent.OneWayUp) + first.Count(CellContent.OneWayRight) +
+                                     first.Count(CellContent.OneWayDown) + first.Count(CellContent.OneWayLeft) > 0 ? 1 : 0;
+                            Require(kinds >= 2, "Combined obstacle test did not combine obstacle mechanics.");
+                        }
+                    }
+
+                    if (mode == GenerationMode.MazeTesting)
+                    {
+                        Require(first.largeMaze && first.advancedDevMaze,
+                            "Maze Testing level did not use the advanced dev-only maze profile.");
+                        Require(first.width >= 12 && first.height >= 12,
+                            "Maze Testing level used a grid below the 12x12 baseline.");
+                        Require(!first.cat.IsEnabled,
+                            "Maze Testing unexpectedly enabled the turn-based cat rules.");
+                        if (number >= 3)
+                        {
+                            Require(first.hardPathLimit && first.moveLimit > first.parMoves,
+                                "Hard+ Maze Testing level omitted strict hard path pressure.");
+                        }
+                        AdvancedDevMazeReport advanced =
+                            AdvancedDevMazeEvaluator.Analyze(first);
+                        Require(
+                            !advanced.topology.fullBlockedPerimeter &&
+                            advanced.topology.playableEdgeCells >= 6,
+                            "Maze Testing level wasted the full perimeter on blockers.");
+                        Require(advanced.shortcutChoices >= 2,
+                            "Maze Testing level omitted meaningful shortcut/branch traps.");
+                        Require(advanced.finalCrumbToDock >= 7,
+                            "Maze Testing level made dock return trivial.");
+                    }
+                }
+
+                if (mode == GenerationMode.CatTesting)
+                {
+                    Require(cats * 10 >= count * 8, "Cat Testing fell below 80% cat levels.");
+                }
+                if (mode == GenerationMode.TutorialTesting)
+                {
+                    Require(cats == 1, "Tutorial Testing should contain one focused cat introduction.");
+                }
+                if (mode == GenerationMode.MazeTesting)
+                {
+                    Require(slipperyTiles >= 6,
+                        "Maze Testing did not exercise enough slippery momentum tiles.");
+                }
+            }
         }
 
         private static void ValidateHazardBlocking(LevelDefinition tutorial)

@@ -10,6 +10,7 @@ namespace DustBot
             public GridPosition bot;
             public GridPosition cat;
             public int crumbsMask;
+            public int fragileMask;
             public bool bonusCollected;
 
             public bool Equals(SearchState other)
@@ -17,6 +18,7 @@ namespace DustBot
                 return bot == other.bot &&
                        cat == other.cat &&
                        crumbsMask == other.crumbsMask &&
+                       fragileMask == other.fragileMask &&
                        bonusCollected == other.bonusCollected;
             }
 
@@ -32,6 +34,7 @@ namespace DustBot
                     int hash = bot.GetHashCode();
                     hash = (hash * 397) ^ cat.GetHashCode();
                     hash = (hash * 397) ^ crumbsMask;
+                    hash = (hash * 397) ^ fragileMask;
                     hash = (hash * 397) ^ (bonusCollected ? 1 : 0);
                     return hash;
                 }
@@ -70,7 +73,13 @@ namespace DustBot
             }
 
             List<GridPosition> crumbs = GetCrumbs(level);
+            List<GridPosition> fragileTiles = GetTiles(level, CellContent.Fragile);
             if (crumbs.Count > 20)
+            {
+                return false;
+            }
+
+            if (fragileTiles.Count > 20)
             {
                 return false;
             }
@@ -81,6 +90,7 @@ namespace DustBot
                 bot = level.Find(CellContent.Start),
                 cat = level.cat.startPosition,
                 crumbsMask = CrumbMaskAt(crumbs, level.Find(CellContent.Start)),
+                fragileMask = TileMaskAt(fragileTiles, level.Find(CellContent.Start)),
                 bonusCollected =
                     level.objectives.collectBonus &&
                     level.Find(CellContent.Start) == level.bonusPosition
@@ -101,7 +111,7 @@ namespace DustBot
                     Direction direction = SearchOrder[i];
                     GridPosition nextBot =
                         node.state.bot + DirectionUtility.ToOffset(direction);
-                    if (!CanDustBotEnter(level, nextBot) ||
+                    if (!CanDustBotMove(level, node.state.bot, nextBot) ||
                         nextBot == node.state.cat)
                     {
                         continue;
@@ -109,6 +119,14 @@ namespace DustBot
 
                     int nextMask =
                         node.state.crumbsMask | CrumbMaskAt(crumbs, nextBot);
+                    int nextFragileBit = TileMaskAt(fragileTiles, nextBot);
+                    if (nextFragileBit != 0 &&
+                        (node.state.fragileMask & nextFragileBit) != 0)
+                    {
+                        continue;
+                    }
+
+                    int nextFragileMask = node.state.fragileMask | nextFragileBit;
                     bool nextBonus =
                         node.state.bonusCollected ||
                         (level.objectives.collectBonus &&
@@ -137,6 +155,7 @@ namespace DustBot
                         bot = nextBot,
                         cat = catStep.to,
                         crumbsMask = nextMask,
+                        fragileMask = nextFragileMask,
                         bonusCollected = nextBonus
                     };
                     if (!visited.Add(next))
@@ -182,11 +201,23 @@ namespace DustBot
             }
 
             CellContent content = level.GetContent(position);
-            return content != CellContent.Wall &&
-                   content != CellContent.Toy &&
-                   content != CellContent.Sock &&
-                   content != CellContent.Cord &&
-                   content != CellContent.WetSpot;
+            return CellContentUtility.IsWalkableFloor(content);
+        }
+
+        private static bool CanDustBotMove(
+            LevelDefinition level,
+            GridPosition from,
+            GridPosition to)
+        {
+            if (!CanDustBotEnter(level, to))
+            {
+                return false;
+            }
+
+            return CellContentUtility.AllowsDirection(
+                level.GetContent(from),
+                level.GetContent(to),
+                DirectionUtility.Between(from, to));
         }
 
         public static List<GridPosition> BuildRoute(
@@ -233,16 +264,21 @@ namespace DustBot
 
         private static List<GridPosition> GetCrumbs(LevelDefinition level)
         {
-            List<GridPosition> crumbs = new List<GridPosition>();
+            return GetTiles(level, CellContent.Crumb);
+        }
+
+        private static List<GridPosition> GetTiles(LevelDefinition level, CellContent content)
+        {
+            List<GridPosition> tiles = new List<GridPosition>();
             for (int i = 0; i < level.cells.Count; i++)
             {
-                if (level.cells[i].content == CellContent.Crumb)
+                if (level.cells[i].content == content)
                 {
-                    crumbs.Add(level.cells[i].position);
+                    tiles.Add(level.cells[i].position);
                 }
             }
 
-            return crumbs;
+            return tiles;
         }
 
         private static int CrumbMaskAt(
@@ -253,6 +289,22 @@ namespace DustBot
             for (int i = 0; i < crumbs.Count; i++)
             {
                 if (crumbs[i] == position)
+                {
+                    mask |= 1 << i;
+                }
+            }
+
+            return mask;
+        }
+
+        private static int TileMaskAt(
+            List<GridPosition> tiles,
+            GridPosition position)
+        {
+            int mask = 0;
+            for (int i = 0; i < tiles.Count; i++)
+            {
+                if (tiles[i] == position)
                 {
                     mask |= 1 << i;
                 }

@@ -15,7 +15,11 @@ namespace DustBot
                 return false;
             }
 
-            if (level.width < 2 || level.height < 2 || level.width > 12 || level.height > 12)
+            bool allowsExtremeDevGrid = level.advancedDevMaze &&
+                                        level.generationMode != GenerationMode.ProductionCampaign;
+            int maximumBoardSize = allowsExtremeDevGrid ? 40 : 22;
+            if (level.width < 2 || level.height < 2 ||
+                level.width > maximumBoardSize || level.height > maximumBoardSize)
             {
                 message = "Board dimensions are outside the supported range.";
                 return false;
@@ -83,9 +87,92 @@ namespace DustBot
                 return false;
             }
 
-            if (level.parMoves != level.expectedSolution.Count)
+            if (level.objectives.bonusRequiredForThreeStars &&
+                !level.objectives.collectBonus)
             {
-                message = "Par moves must match the expected solution length.";
+                message = "A required three-star Dust Bunny is not enabled.";
+                return false;
+            }
+
+            HashSet<GridPosition> visited = new HashSet<GridPosition> { start };
+            HashSet<GridPosition> crumbs = new HashSet<GridPosition>();
+            for (int i = 0; i < level.cells.Count; i++)
+            {
+                if (level.cells[i].content == CellContent.Crumb)
+                {
+                    crumbs.Add(level.cells[i].position);
+                }
+            }
+
+            GridPosition current = start;
+            int solutionMoveCost = 0;
+            Direction previousDirection = Direction.None;
+            crumbs.Remove(current);
+            HashSet<GridPosition> fragileVisited = new HashSet<GridPosition>();
+            for (int i = 0; i < level.expectedSolution.Count; i++)
+            {
+                SolutionStep step = level.expectedSolution[i];
+                if (step == null ||
+                    !Enum.IsDefined(typeof(Direction), step.direction) ||
+                    step.position != current ||
+                    step.direction == Direction.None)
+                {
+                    message = "Solution steps are discontinuous at index " + i;
+                    return false;
+                }
+
+                GridPosition next = current + DirectionUtility.ToOffset(step.direction);
+                if (!level.IsInside(next))
+                {
+                    message = "Solution leaves the board.";
+                    return false;
+                }
+
+                CellContent fromContent = level.GetContent(current);
+                CellContent content = level.GetContent(next);
+                if (CellContentUtility.IsDustBotBlocker(content))
+                {
+                    message = "Solution crosses blocked or hazardous content.";
+                    return false;
+                }
+
+                if (fromContent == CellContent.Slippery &&
+                    previousDirection != Direction.None &&
+                    previousDirection != step.direction)
+                {
+                    message = "Solution turns while crossing a slippery tile at index " + i + ".";
+                    return false;
+                }
+
+                if (!CellContentUtility.AllowsDirection(fromContent, content, step.direction))
+                {
+                    message = "Solution violates a one-way tile at index " + i + ".";
+                    return false;
+                }
+
+                current = next;
+                previousDirection = step.direction;
+                solutionMoveCost += CellContentUtility.MoveCost(content);
+                if (content == CellContent.Fragile && !fragileVisited.Add(current))
+                {
+                    message = "Solution crosses a fragile tile more than once.";
+                    return false;
+                }
+
+                if (!visited.Add(current) &&
+                    current != dock &&
+                    !level.cat.IsEnabled)
+                {
+                    message = "The expected route revisits a tile.";
+                    return false;
+                }
+
+                crumbs.Remove(current);
+            }
+
+            if (level.parMoves != solutionMoveCost)
+            {
+                message = "Par moves must match the expected route movement cost.";
                 return false;
             }
 
@@ -108,64 +195,6 @@ namespace DustBot
             {
                 message = "Star move targets are inconsistent with par.";
                 return false;
-            }
-
-            if (level.objectives.bonusRequiredForThreeStars &&
-                !level.objectives.collectBonus)
-            {
-                message = "A required three-star Dust Bunny is not enabled.";
-                return false;
-            }
-
-            HashSet<GridPosition> visited = new HashSet<GridPosition> { start };
-            HashSet<GridPosition> crumbs = new HashSet<GridPosition>();
-            for (int i = 0; i < level.cells.Count; i++)
-            {
-                if (level.cells[i].content == CellContent.Crumb)
-                {
-                    crumbs.Add(level.cells[i].position);
-                }
-            }
-
-            GridPosition current = start;
-            crumbs.Remove(current);
-            for (int i = 0; i < level.expectedSolution.Count; i++)
-            {
-                SolutionStep step = level.expectedSolution[i];
-                if (step == null ||
-                    !Enum.IsDefined(typeof(Direction), step.direction) ||
-                    step.position != current ||
-                    step.direction == Direction.None)
-                {
-                    message = "Solution steps are discontinuous at index " + i;
-                    return false;
-                }
-
-                current += DirectionUtility.ToOffset(step.direction);
-                if (!level.IsInside(current))
-                {
-                    message = "Solution leaves the board.";
-                    return false;
-                }
-
-                CellContent content = level.GetContent(current);
-                if (content == CellContent.Wall || content == CellContent.Toy ||
-                    content == CellContent.Sock || content == CellContent.Cord ||
-                    content == CellContent.WetSpot)
-                {
-                    message = "Solution crosses blocked or hazardous content.";
-                    return false;
-                }
-
-                if (!visited.Add(current) &&
-                    current != dock &&
-                    !level.cat.IsEnabled)
-                {
-                    message = "The expected route revisits a tile.";
-                    return false;
-                }
-
-                crumbs.Remove(current);
             }
 
             if (current != dock)
@@ -208,6 +237,12 @@ namespace DustBot
                     return false;
                 }
 
+                if (!CatObstacleSimulator.SharesWalkableRegionWithDustBot(level))
+                {
+                    message = "The cat starts in a disconnected walkable region.";
+                    return false;
+                }
+
                 List<GridPosition> expectedRoute = CatObstacleSimulator.BuildExpectedRoute(level);
                 CatRoutePreview catPreview = CatObstacleSimulator.SimulateRoute(
                     level,
@@ -225,9 +260,12 @@ namespace DustBot
                 if (!relevance.IsStrategicallyActive)
                 {
                     message = string.Format(
-                        "The cat is trapped or negligible: open {0}, reachable {1}, movement {2}, unique {3}, closest {4}, pressure {5}.",
+                        "The cat is trapped or negligible: open {0}, reachable {1}, route {2}, botRegion {3}, routeDist {4}, movement {5}, unique {6}, closest {7}, pressure {8}.",
                         relevance.openStartNeighbors,
                         relevance.reachableTiles,
+                        relevance.reachableRouteTiles,
+                        relevance.sameConnectedRegion,
+                        relevance.distanceToRoute,
                         relevance.movementTurns,
                         relevance.uniqueVisitedTiles,
                         relevance.closestDistance,
@@ -248,6 +286,74 @@ namespace DustBot
                 {
                     message = "The cat level has no valid turn-based cleaning solution.";
                     return false;
+                }
+            }
+
+            if (level.largeMaze)
+            {
+                if (level.width < 8 || level.height < 8)
+                {
+                    message = "Large mazes must be at least 8×8.";
+                    return false;
+                }
+
+                if (level.cat.IsEnabled)
+                {
+                    message = "Large path mazes cannot also use the turn-based cat rules.";
+                    return false;
+                }
+
+                LargeMazeComplexityReport maze = LargeMazeEvaluator.Analyze(level);
+                int area = level.width * level.height;
+                int minimumScore = level.difficultyTier >= DifficultyTier.Master
+                    ? 104
+                    : level.difficultyTier >= DifficultyTier.Expert
+                        ? 92
+                        : level.difficultyTier >= DifficultyTier.Hard ? 80 : 62;
+                if (!maze.allObjectivesReachable)
+                {
+                    message = "One or more large-maze objectives are unreachable.";
+                    return false;
+                }
+
+                if (maze.tooOpen || maze.tooLinear || maze.tooTedious ||
+                    maze.score < minimumScore ||
+                    maze.branches < Math.Max(3, area / 65) ||
+                    maze.deadEnds < Math.Max(3, area / 85) ||
+                    maze.loops < Math.Max(2, area / 170))
+                {
+                    message = string.Format(
+                        "Large maze is under-complex: score {0}/{1}, open {2}%, branches {3}, dead ends {4}, loops {5}, chokepoints {6}, decoys {7}.",
+                        maze.score,
+                        minimumScore,
+                        maze.openPercent,
+                        maze.branches,
+                        maze.deadEnds,
+                        maze.loops,
+                        maze.chokepoints,
+                        maze.decoyPaths);
+                    return false;
+                }
+
+                if (level.objectives.collectBonus && maze.bonusDetourCost < 2)
+                {
+                    message = "The large-maze Dust Bunny must require a meaningful optional detour.";
+                    return false;
+                }
+
+                if (level.advancedDevMaze)
+                {
+                    AdvancedDevMazeReport advanced;
+                    string advancedReason;
+                    if (!AdvancedDevMazeEvaluator.MeetsRequirements(
+                            level,
+                            maze,
+                            out advanced,
+                            out advancedReason))
+                    {
+                        message = "Advanced dev maze rejected: " + advancedReason;
+                        return false;
+                    }
                 }
             }
 
@@ -273,6 +379,10 @@ namespace DustBot
                 .Append(level.hardPathLimit ? '1' : '0').Append('|')
                 .Append((int)level.archetype).Append('|')
                 .Append(level.engagementScore.ToString(CultureInfo.InvariantCulture)).Append('|')
+                .Append(level.strategicDepthScore.ToString(CultureInfo.InvariantCulture)).Append('|')
+                .Append(level.catPressureScore.ToString(CultureInfo.InvariantCulture)).Append('|')
+                .Append(level.largeMaze ? '1' : '0').Append(':')
+                .Append(level.mazeComplexityScore.ToString(CultureInfo.InvariantCulture)).Append('|')
                 .Append(level.themeId).Append('|')
                 .Append(level.mechanicSet).Append('|')
                 .Append(level.objectiveSet).Append('|')

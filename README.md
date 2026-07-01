@@ -18,6 +18,11 @@ folder, and open it with Unity `6000.5.0f1`.
 
 Touch DustBot and drag through orthogonally adjacent tiles to draw one continuous route. Clean every crumb and finish at the charging dock. Drag backward to erase, or use Undo, Reset, and earned-coin hints.
 
+Development builds include a separate Maze Testing playlist with carved mazes
+from 10×10 through 26×26. Drag anywhere away from DustBot to pan, pinch or use
+−/+ to zoom, and tap ◎ to return to the readable overview. The camera follows
+DustBot during long simulations and edge-pans while a route is being drawn.
+
 Cat Chase rooms switch to one-tile directional swipes. DustBot moves first,
 then a predictable Curious Cat makes two horizontal-first pursuit moves.
 Furniture, corners, and corridors become tools for cleaning safely.
@@ -28,6 +33,20 @@ Furniture, corners, and corridors become tools for cleaning safely.
 - **Daily Challenge:** one deterministic room per calendar day with streak rewards.
 - **Master Clean:** unlocks after completing the Main Journey.
 - **Endless Clean:** persistent room progression and best score.
+
+## Development generation modes
+
+Unity Editor and development builds default to a deterministic 30-level
+Development Campaign. Open **DEV** from the main menu or any level header to
+switch among Production Campaign (6,000), Development Campaign (30), Maze
+Testing (20), Cat Testing (24), Obstacle Testing (18), and Tutorial Testing (8).
+Non-development release builds always force Production Campaign and do not
+expose the panel.
+
+The panel supports level jumping/navigation, deterministic regeneration, save
+reset, progression/cosmetic unlocks, coin grants, and detailed seed, solver,
+difficulty, obstacle, and cat-pressure metadata. Test campaign completions do
+not advance production journey, Daily Challenge, or Master Clean progress.
 
 Progress, settings, stars, Dust Coins, Dust Bunnies, cosmetics, daily streaks,
 and endless progress are saved locally with a backup-safe JSON save system.
@@ -42,6 +61,8 @@ Use these Unity menu commands:
 
 - `DustBot > Configure Project` applies the iPhone release settings and app icon.
 - `DustBot > Run Content Validation` compiles and simulates all 6,000 journey levels plus tutorial, daily, master, hazard, determinism, reward, and save-repair checks.
+- `DustBot > Run Development Mode Validation` checks and simulates every compact testing playlist twice for determinism.
+- `DustBot > Validate Large Mazes` checks the Dev Level 9 baseline, nine advanced Development Campaign mazes, all 20 Maze Testing fixtures through 26×26, and the existing production Master fixture. It audits topology and draws each canonical long route through the gameplay input system.
 - `DustBot > Build iOS Release` validates the game and creates the Xcode project at `Build/iOS`.
 
 Implementation details and physical-device checks are documented in
