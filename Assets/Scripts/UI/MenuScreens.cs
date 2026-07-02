@@ -422,7 +422,10 @@ namespace DustBot
             Text title = UIFactory.CreateText("Title", root.transform, "SETTINGS", 72, DustBotTheme.Ink);
             UIFactory.SetAnchors(title.rectTransform, new Vector2(0.1f, 0.78f), new Vector2(0.9f, 0.92f), Vector2.zero, Vector2.zero);
 
-            RectTransform buttons = CreateVerticalButtonArea(root.transform, new Vector2(0.14f, 0.20f), new Vector2(0.86f, 0.75f));
+            // Keep the button stack clear of the footer below it. The previous
+            // 0.20 lower anchor placed the eighth item (Reset Progress) in the
+            // same band as the privacy/version text on portrait iPhones.
+            RectTransform buttons = CreateVerticalButtonArea(root.transform, new Vector2(0.14f, 0.275f), new Vector2(0.86f, 0.75f));
             PlayerSettingsData settings = app.Progression.Data.settings;
 
             Button sound = AddMenuButton(buttons, ToggleLabel("SOUND", settings.soundEnabled), null, DustBotTheme.Mint);
@@ -681,7 +684,7 @@ namespace DustBot
             RectTransform rect = area.GetComponent<RectTransform>();
             UIFactory.SetAnchors(rect, min, max, Vector2.zero, Vector2.zero);
             VerticalLayoutGroup layout = area.AddComponent<VerticalLayoutGroup>();
-            layout.spacing = 22f;
+            layout.spacing = 14f;
             layout.childAlignment = TextAnchor.MiddleCenter;
             layout.childControlHeight = true;
             layout.childControlWidth = true;

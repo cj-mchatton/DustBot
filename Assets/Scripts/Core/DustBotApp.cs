@@ -267,6 +267,9 @@ namespace DustBot
             UI.ShowMainMenu();
             yield return CaptureAfterLayout(Path.Combine(path, "01-main-menu.png"));
 
+            UI.ShowSettings();
+            yield return CaptureAfterLayout(Path.Combine(path, "08-settings.png"));
+
             UI.ShowLevelSelect(0);
             yield return CaptureAfterLayout(Path.Combine(path, "02-level-select.png"));
 
