@@ -30,6 +30,10 @@ namespace DustBot
                     if (outcome.catMoveCount > 0 || outcome.catCollision)
                     {
                         audio.PlayCatStep(outcome.catCollision);
+                        if (!outcome.catCollision)
+                        {
+                            audio.PlayCatPositionCue(outcome.to, outcome.catTo);
+                        }
                     }
 
                     yield return board.AnimateCruiseStep(

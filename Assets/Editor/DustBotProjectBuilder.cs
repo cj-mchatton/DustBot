@@ -59,6 +59,7 @@ namespace DustBot.Editor
 
             ConfigureUIMaterial();
             ConfigureAppIcon();
+            AudioAssetConfigurator.ValidateCozyAudio();
 
             AssetDatabase.SaveAssets();
         }

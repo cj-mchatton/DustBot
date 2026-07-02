@@ -303,19 +303,25 @@ namespace DustBot
         {
             if (result == PathEditResult.Invalid)
             {
+                app.Audio.PlayInvalidPath(false);
                 app.Haptics.Error();
                 StartCoroutine(FlashStatus(
                     "BLOCKED • The red × and shake mark an invalid tile."));
             }
             else if (result == PathEditResult.LimitReached)
             {
+                app.Audio.PlayInvalidPath(true);
                 app.Haptics.Error();
                 StartCoroutine(FlashStatus(
                     "MAX COST " + level.moveLimit + " — drag backward or trim the route."));
             }
             else
             {
-                app.Audio.PlayPathEdit();
+                bool routeReady =
+                    session.PlannedCrumbsRemaining == 0 &&
+                    session.CurrentPathCells.Count > 1 &&
+                    session.CurrentPathCells[session.CurrentPathCells.Count - 1] == session.Grid.Dock;
+                app.Audio.PlayPathEdit(result, routeReady);
                 app.Haptics.LightTap();
             }
 
@@ -327,6 +333,8 @@ namespace DustBot
             string issue;
             if (session.TryGetRouteIssue(out issue))
             {
+                app.Audio.PlayInvalidPath(issue.IndexOf("cost", System.StringComparison.OrdinalIgnoreCase) >= 0 ||
+                                          issue.IndexOf("move", System.StringComparison.OrdinalIgnoreCase) >= 0);
                 app.Haptics.Error();
                 StartCoroutine(FlashStatus(issue));
                 return;
@@ -336,6 +344,8 @@ namespace DustBot
             {
                 return;
             }
+
+            app.Audio.PlayBotStart();
 
             if (level.mode == GameMode.DailyChallenge)
             {
@@ -377,6 +387,7 @@ namespace DustBot
                     session.Grid.IsInside(blocked)
                         ? blocked
                         : session.BotPosition);
+                app.Audio.PlayInvalidPath(false);
                 app.Haptics.Error();
                 StartCoroutine(FlashStatus(
                     "BLOCKED • Swipe toward an open neighboring tile."));
@@ -398,6 +409,10 @@ namespace DustBot
             if (outcome.catMoveCount > 0 || outcome.catCollision)
             {
                 app.Audio.PlayCatStep(outcome.catCollision);
+                if (!outcome.catCollision)
+                {
+                    app.Audio.PlayCatPositionCue(outcome.to, outcome.catTo);
+                }
             }
 
             yield return board.AnimateCatTurn(
@@ -473,6 +488,7 @@ namespace DustBot
 
             if (app.Economy.Coins < cost)
             {
+                app.Audio.PlayNotEnoughCoins();
                 ShowHintNotice(
                     "Not Enough Coins",
                     "Not enough Dust Coins.\nA hint costs " + cost + " Dust Coins.");
@@ -506,6 +522,7 @@ namespace DustBot
         private void ShowHintConfirmation(int cost)
         {
             CloseModal();
+            app.Audio.PlayHintConfirmationOpened();
             modal = UIFactory.CreateUIObject("Hint Confirmation", transform);
             UIFactory.Stretch(modal);
             Image shade = modal.AddComponent<Image>();
@@ -644,7 +661,7 @@ namespace DustBot
 
             if (outcome.collectedBonus)
             {
-                app.Audio.PlayReward();
+                app.Audio.PlayDustBunnyCollected();
                 board.RefreshCell(outcome.to);
             }
 
@@ -675,7 +692,6 @@ namespace DustBot
             UpdateHud();
 
             app.Audio.PlayDock();
-            app.Audio.PlayWin();
             app.Haptics.Success();
             AnalyticsStub.Track(LevelCompleteEvent(level.mode));
             StartCoroutine(ShowWinSequence(result));
@@ -684,7 +700,16 @@ namespace DustBot
         private IEnumerator ShowWinSequence(LevelResult result)
         {
             yield return board.AnimateDockArrival();
+            app.Audio.PlayWin();
             yield return board.AnimateWin();
+            if (result.stars >= 3)
+            {
+                app.Audio.PlayPerfectClean();
+            }
+            else
+            {
+                app.Audio.PlayStarEarned();
+            }
             string nextText = NextLevelText();
             string details = string.Format(
                 "{0}\n{1}\n+{2} Dust Coins{3}{4}{5}",
@@ -701,7 +726,7 @@ namespace DustBot
 
         private void HandleFailure()
         {
-            app.Audio.PlayFail();
+            app.Audio.PlayFailure(session.FailureReason);
             app.Haptics.Failure();
             AnalyticsStub.Track("level_fail");
             ShowModal("CLEANING INTERRUPTED", FailureText(session.FailureReason), false);

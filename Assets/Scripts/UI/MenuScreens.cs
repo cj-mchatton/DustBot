@@ -431,6 +431,7 @@ namespace DustBot
                 settings.soundEnabled = !settings.soundEnabled;
                 UIFactory.GetButtonText(sound).text = ToggleLabel("SOUND", settings.soundEnabled);
                 app.ApplySettings();
+                app.Audio.PlayToggle();
                 app.SaveNow();
             });
 
@@ -440,6 +441,7 @@ namespace DustBot
                 settings.musicEnabled = !settings.musicEnabled;
                 UIFactory.GetButtonText(music).text = ToggleLabel("MUSIC", settings.musicEnabled);
                 app.ApplySettings();
+                app.Audio.PlayToggle();
                 app.SaveNow();
             });
 
@@ -449,6 +451,7 @@ namespace DustBot
                 settings.musicVolume = CycleVolume(settings.musicVolume);
                 UIFactory.GetButtonText(musicVolume).text = VolumeLabel("MUSIC VOL", settings.musicVolume);
                 app.ApplySettings();
+                app.Audio.PlayToggle();
                 app.SaveNow();
             });
 
@@ -458,6 +461,7 @@ namespace DustBot
                 settings.soundVolume = CycleVolume(settings.soundVolume);
                 UIFactory.GetButtonText(soundVolume).text = VolumeLabel("SOUND VOL", settings.soundVolume);
                 app.ApplySettings();
+                app.Audio.PlayToggle();
                 app.SaveNow();
             });
 
@@ -467,6 +471,7 @@ namespace DustBot
                 settings.hapticsEnabled = !settings.hapticsEnabled;
                 UIFactory.GetButtonText(haptics).text = ToggleLabel("HAPTICS", settings.hapticsEnabled);
                 app.ApplySettings();
+                app.Audio.PlayToggle();
                 app.SaveNow();
             });
 
@@ -803,8 +808,17 @@ namespace DustBot
                 string.Empty,
                 delegate
                 {
+                    bool wasOwned = app.Cosmetics.Owns(captured.id);
                     if (app.Cosmetics.TryUnlockOrSelect(captured.id))
                     {
+                        if (wasOwned)
+                        {
+                            app.Audio.PlayStoreItemSelected();
+                        }
+                        else
+                        {
+                            app.Audio.PlayPurchaseSuccess();
+                        }
                         app.SaveNow();
                         app.UI.ShowCosmetics(refreshCategory, 0);
                     }

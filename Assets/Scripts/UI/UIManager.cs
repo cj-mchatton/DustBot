@@ -218,6 +218,11 @@ namespace DustBot
                 Destroy(modalOverlay);
             }
 
+            if (app != null && app.Audio != null)
+            {
+                app.Audio.PlayMenuOpen();
+            }
+
             modalOverlay = UIFactory.CreateUIObject("Info Modal", safeArea);
             UIFactory.Stretch(modalOverlay);
             Image shade = modalOverlay.AddComponent<Image>();

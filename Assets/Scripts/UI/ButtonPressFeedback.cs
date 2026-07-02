@@ -41,7 +41,7 @@ namespace DustBot
             AudioManager audio = Object.FindAnyObjectByType<AudioManager>();
             if (audio != null)
             {
-                audio.PlayButtonTap();
+                audio.PlayButtonForContext(gameObject.name);
             }
         }
     }
