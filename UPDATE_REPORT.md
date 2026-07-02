@@ -1,167 +1,147 @@
-# DustBot difficulty, economy, and Daily Challenge update
+# DustBot cat variety and campaign maze integration report
 
-## Difficulty and engagement pacing
+## Screenshot-driven changes
 
-- Levels 1–15 remain the hand-authored tutorial sequence.
-- Levels 16–25 use short 5×5 puzzles with earlier blockers, two crumbs from
-  Level 20, and gentle hazards from roughly Level 20 onward.
-- Levels 26–50 use longer routes, two to three crumbs, meaningful blockers,
-  gentle hazards, and rare Dust Bunny detours.
-- Levels 51–100 commonly use three crumbs, occasionally four, with stronger
-  route-shaping obstacles and meaningful three-star requirements.
-- Levels 101–200 use more 6×7 boards, three to four crumbs, tighter move
-  targets, and more frequent Dust Bunnies.
-- Levels 201+ continue into larger boards and combined mechanics.
+The supplied Cat Chase 46 and 49 screenshots exposed the production fallback:
+both were the same 6×5, one-cat, one-crumb, one-dock template with only mirrored
+wall and endpoint positions. Production cat levels after the level-21 tutorial
+now use deterministic procedural arenas instead. In the new generation,
+representative levels 46 and 49 are 8×8 multi-objective cat puzzles with
+different declared strategies (Corridor Delay and Safe Pocket).
 
-Main Journey follows a deterministic six-level hook rhythm:
+Level 21 remains hand-authored because it teaches the one-tile swipe and the
+cat's two-step, horizontal-first response safely.
 
-1. normal/simple or crumb-order puzzle
-2. blocker maze
-3. trickier routing puzzle
-4. breather
-5. Dust Bunny detour
-6. hazard-avoidance or tight-path puzzle
+## Cat mechanics and archetypes
 
-The implemented archetypes are Simple Route, Crumb Order, Blocker Maze,
-Hazard Avoidance, Dust Bunny Detour, Tight Path, Breather, Trick Route, and
-Challenge Route.
+The movement rule did not change: DustBot moves one tile, then the cat takes
+two deterministic steps toward DustBot, trying horizontal movement before
+vertical movement and respecting furniture. The solver still proves that all
+crumbs (and a required Dust Bunny) can be collected before docking.
 
-## Boring-level rejection
+Generated cat levels now declare one of 19 archetypes:
 
-`LevelEngagementEvaluator` scores every generated candidate using:
+- Horizontal Priority Trap
+- Loop Around Furniture
+- Corridor Delay
+- Chokepoint Timing
+- Safe Pocket
+- Split Room
+- Dock Pressure
+- Dust Bunny Risk
+- Crumb Order Chase
+- Near Catch
+- Cat at the Chokepoint
+- Long Route vs Safe Route
+- Central Island
+- Lure Away from Crumb
+- Lure Away from Dock
+- Backtrack Bait
+- Multi-Corridor Pursuit
+- Furniture Delay
+- Multi-Crumb Route Planning
 
-- solution length
-- route turns
-- endpoint detour
-- crumb count
-- alternate route decisions
-- blockers adjacent to the intended route
-- hazards adjacent to the intended route
-- Dust Bunny objective presence
+The archetype changes crumb count, blocker density, objective placement,
+route length, preferred cat start zone, and the placement score used when
+choosing a fair cat start. The generator rejects a candidate when the solved
+route does not exhibit the promised strategy.
 
-After Level 25, candidates are rejected when they are too short, too straight,
-too sparse, too dense, or below the level range’s engagement target. Rejected
-candidates advance through deterministic candidate seeds, so all players still
-receive the same accepted puzzle.
+## Anti-repetition and pressure validation
 
-## Canonical determinism
+The campaign uses a coprime 19-profile schedule, so it visits every cat
+archetype before repeating. A second deterministic five-zone schedule rotates
+the cat start among corners, sides, and central pressure. Board sizes, path
+archetype, crumb counts, and campaign difficulty add further variation.
 
-Generation is now version 3. Main Journey metadata is still a pure function of
-level number; Daily metadata is a pure function of calendar date; Master Clean
-is a pure function of Master level number; Endless is a pure function of run
-seed and room number.
+`CatLevelVarietyEvaluator` records route change versus the cat-free solution,
+intentional backtracking, near-catches, horizontal/vertical cat movement,
+crumb/dock/Dust Bunny pressure, corridors, branches, chokepoints, loops, safe
+pockets, nearby furniture, and a compact solution-pattern fingerprint. The
+cat validation runner keeps a recent window and fails on repeated archetypes
+or excessive strategic fingerprint repetition.
 
-The validator compares full serialized signatures and simulations for the
-canonical checkpoints, including Levels 20, 100, 500, and 6000. The generator
-still supports versions 1 and 2 when supplied by older metadata.
+Pressure scoring now includes route threats, route changes, backtracking,
+near-catches, objective pressure, dock return pressure, optional Dust Bunny
+risk, cat mobility, and furniture interaction. Levels are rejected when the
+cat is trapped, disconnected, negligible, unsafe on the canonical solution,
+unsolvable, below pressure, or inconsistent with the declared archetype.
 
-## Economy
+This adapts the useful predictable-pursuer idea to DustBot without copying a
+reference game's maps, wording, theme, art, or solutions. The player cleans a
+home, manipulates a pet cat around furniture, and must return to a dock.
 
-All tunable values live in `EconomyConfig`:
+## Main-campaign maze integration
 
-- normal completion: 10 Dust Coins
-- two-star total bonus: 5
-- three-star total bonus: 10
-- Dust Bunny: 15
-- milestone every 25 levels: 100
-- normal hint: 50
-- Daily hint: 75
-- tutorials 1–3: free hints
+Generation version 8 enables production large mazes instead of reserving them
+for development playlists. Scaling is gradual:
 
-Normal retries and progression never cost coins.
+- Levels 1–3: onboarding
+- Levels 4–20: 6×6/7×7 light maze and route ideas
+- Levels 21–35: 6×6/7×7 cat introduction and early strategy
+- Levels 36–60: selected 8×8/9×9 production mazes
+- Levels 61–100: selected 9×9/10×10 mazes
+- Levels 101–250: selected 12×12/13×13 mazes
+- Levels 251–500: selected 13×13/14×14 mazes
+- Levels 501–1000: selected 14×14/15×15 mazes
+- Levels 1001–4000: selected 15×15 through 18×18 expert mazes
+- Levels 4001–6000: 18×18 through 21×21 Master-tier mazes
+- Master Clean: 18×18 through 22×22 mazes
 
-Dust Bunnies are optional, saved per level, displayed in level select, counted
-globally, and awarded only once per puzzle. They appear rarely at Levels 26–50,
-occasionally from Level 51 onward, frequently later, and almost always in
-Daily/Master challenge profiles.
+Depth-first corridors are enriched with rooms, loops, branches, dead ends,
+chokepoints, decoys, separated crumbs, a required Dust Bunny detour, route
+modifiers, and tight star/path-cost targets. Production generation now carves
+spaced connected edge branches before choosing the maze diameter. Validation
+rejects a full blocked perimeter or too few playable edge cells, so the board
+boundary is used instead of wasting every outside tile on a wall ring.
 
-Stars are calculated as:
+`LargeMazeEvaluator` validates reachability, open-cell ratio, linearity,
+route length, branches, dead ends, loops, chokepoints, rooms, decoys, crumb
+separation, final-crumb-to-dock distance, bonus detour cost, optimal-route gap,
+path-cost pressure, and playable edges.
 
-- one star: complete
-- two stars: meet the forgiving two-star move target
-- three stars: meet the near-optimal target, satisfy no-hint/no-undo rules,
-  and collect the Dust Bunny when that level requires it
+The large-board UI supplies viewport clipping, pinch zoom, two-finger pan,
+zoom/reset controls, edge auto-pan while drawing, thicker large-maze path
+presentation, and bot-follow during simulation. Production mazes now open and
+reset at a full-board fitted overview before the player zooms in. No Settings,
+audio, SFX, economy, save, cosmetics, or menu code was changed.
 
-## Cosmetics
+## Determinism and validation
 
-The save now includes owned cosmetics and active selections. Implemented
-entries:
+Generation version was intentionally advanced from 7 to 8. Main Journey is a
+pure function of level number and version; Daily remains a pure function of
+date; Master Clean remains a pure function of its level number; Endless also
+retains its run seed. Candidate rerolls use deterministic candidate salts.
 
-- Classic Mint bot
-- Honey Polish bot, 400 coins
-- Bunny Lavender bot, unlocked at 10 Dust Bunnies
-- Mint Route
-- Coral Route, 250 coins
-- Sky Route, 300 coins
+Automated checks:
 
-Bot tint and route color visibly update during gameplay. Cosmetics never alter
-rules or outcomes. A non-functional `AdsStub` interface remains available for
-a future consent-aware rewarded-hint integration; no ad SDK is installed.
+- Large-maze batch: 31/31 passed, including 12×12–40×40 development stress
+  boards and a 19×21 production Master Clean board.
+- Cat variety sample (levels 22–180): 55 cat levels, 19 archetypes, 8 board
+  sizes, 55 multi-crumb levels, and 4 recent strategic-fingerprint matches.
+- Full content validation exercises all 6,000 campaign levels twice at
+  checkpoints, simulates canonical routes, checks cat relevance, maze topology,
+  Daily, Master Clean, progression/economy, and audio resource availability.
+  It passed with 851 deterministic cat levels and 4,947 production mazes.
 
-## Daily Challenge
+## Recommended manual tests
 
-Daily Challenge has a separate generation profile:
+Start with:
 
-- deterministic date seed
-- usually 7×7, 7×8, 8×7, or 8×8
-- four to five crumbs
-- meaningful blockers and hazards
-- Dust Bunny enabled
-- at least six turns
-- at least four tiles of endpoint detour
-- engagement target of at least 28
-- challenge-focused archetypes only
+- Level 21 for the unchanged cat tutorial.
+- Levels 24, 27, 30, 33, and 35 for early cat variety.
+- Levels 46 and 49 to compare directly with the supplied screenshots.
+- Levels 50, 55, 73, 86, 121, and 175 for long/safe route, crumb order, dock
+  pressure, Dust Bunny risk, near-catch, and higher-level Dust Bunny pressure.
+- Levels 36–60 for the first production maze appearances.
+- Levels 100, 180, 500, 1000, 2000, 4000, and 6000 for maze scaling.
+- Master Clean 2 and 500, plus the same Daily Challenge before and after an app
+  restart, for mode determinism.
 
-Daily rewards:
+## Remaining concerns
 
-- base completion: 75
-- two-star bonus: 20
-- three-star bonus: 50
-- Dust Bunny: 25
-- no-hint bonus: 25
-- first-attempt bonus: 25
-- seven-day repeating streak schedule: 75, 90, 110, 130, 150, 175, 225
-
-Base and streak rewards can be claimed once per date. Bunny and no-hint rewards
-can be claimed once when achieved. Star improvement rewards only pay the
-difference between the previous and improved rating. Replay remains free and
-can improve stars or collect a missed Bunny without enabling infinite farming.
-
-## Manual test recommendations
-
-Difficulty:
-
-- Levels 1–15 for tutorial clarity
-- Levels 16, 20, and 25 for early hooks
-- Levels 26–32 and 45–55 for archetype rhythm
-- Levels 75, 100, 150, 200, 500, and 6000 for scaling
-
-Economy:
-
-- first clear versus replay of the same Main level
-- one-, two-, and three-star improvements
-- collecting a Bunny on replay
-- Levels 25 and 50 milestone rewards
-- free tutorial hint, 50-coin normal hint, insufficient coins
-- buying/selecting path colors and bot skins
-- unlocking Bunny Lavender at 10 Bunnies
-- save, restart, and confirm ownership/selections
-
-Daily:
-
-- complete once, then replay on the same date
-- improve from one star to three
-- collect a missed Bunny on replay
-- use a hint and verify no no-hint bonus
-- fail once, then complete and verify no first-attempt bonus
-- complete on consecutive dates and verify streak progression
-- restart the app and verify the same date produces the same board
-
-## Remaining balance concerns
-
-- A perfect first-attempt Daily clear is intentionally generous. Retention data
-  may justify reducing the combined Daily payout later.
-- Engagement scoring is a strong structural filter, but human playtesting
-  should still tune individual thresholds and the frequency of breather levels.
-- The first 50 generated levels deserve the most hands-on testing because they
-  determine whether “interesting sooner” still feels welcoming.
+- Structural scoring prevents weak layouts, but human playtests should tune
+  how often a safe but longer route deserves two rather than three stars.
+- Cat pressure is intentionally readable; later telemetry may justify a higher
+  minimum near-catch frequency in Expert levels.
+- The 18×18–22×22 iPhone experience should be tested on the smallest supported
+  screen for icon recognition and comfortable pinch/pan sensitivity.

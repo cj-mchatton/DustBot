@@ -249,6 +249,13 @@ namespace DustBot
                 return false;
             }
 
+            if (report.fullBlockedPerimeter ||
+                report.playableEdgeCells < Math.Max(4, (level.width + level.height) / 6))
+            {
+                reason = "the maze wastes its outer edge on a perimeter wall ring";
+                return false;
+            }
+
             if (report.score < settings.minimumMazeComplexityScore ||
                 report.branches < settings.minimumMazeBranches ||
                 report.deadEnds < settings.minimumMazeDeadEnds ||

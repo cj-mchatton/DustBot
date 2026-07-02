@@ -22,6 +22,8 @@ namespace DustBot
                 threeStarMoveTarget = 11,
                 hardPathLimit = false,
                 archetype = LevelArchetype.BlockerMaze,
+                catPuzzleArchetype = CatPuzzleArchetype.HorizontalPriorityTrap,
+                catFreeParMoves = 7,
                 themeId = "CozyHome",
                 mechanicSet = "CatChaseTurns",
                 objectiveSet = "CleanAllAndDock",

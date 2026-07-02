@@ -83,15 +83,22 @@ namespace DustBot
             {
                 CatRelevanceReport relevance =
                     CatObstacleSimulator.AnalyzeRelevance(level, route);
+                CatStrategyReport strategy =
+                    CatLevelVarietyEvaluator.Analyze(level, route);
                 catPressureScore = relevance.IsStrategicallyActive
                     ? Math.Min(
-                        12,
+                        20,
                         relevance.pressureTurns +
                         Math.Max(0, 5 - relevance.closestDistance) +
                         Math.Min(3, relevance.reachableRouteTiles / 2) +
-                        Math.Min(3, relevance.uniqueVisitedTiles / 2))
+                        Math.Min(3, relevance.uniqueVisitedTiles / 2) +
+                        Math.Min(4, strategy.nearCatchTurns) +
+                        Math.Min(3, strategy.routeChangeMoves) +
+                        Math.Min(2, strategy.backtrackMoves) +
+                        Math.Min(3, strategy.crumbPressure + strategy.dockPressure) +
+                        Math.Min(2, strategy.bonusPressure))
                     : 0;
-                catPressure = Math.Min(6, catPressureScore);
+                catPressure = Math.Min(8, catPressureScore);
             }
             int nearbyBlockers = 0;
             int nearbyHazards = 0;
@@ -125,7 +132,7 @@ namespace DustBot
                 Math.Min(12, obstacleDecisionScore) +
                 Math.Min(8, bonusDetourCost * 2) +
                 Math.Min(10, pathCostPressure * 2) +
-                Math.Min(12, catPressureScore) +
+                Math.Min(16, catPressureScore) +
                 Math.Min(8, possibleRoutes * 2) +
                 Math.Min(6, detour);
 

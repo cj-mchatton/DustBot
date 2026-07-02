@@ -88,6 +88,30 @@ namespace DustBot
         Pouncy
     }
 
+    public enum CatPuzzleArchetype
+    {
+        None,
+        HorizontalPriorityTrap,
+        LoopAroundFurniture,
+        CorridorDelay,
+        ChokepointTiming,
+        SafePocket,
+        SplitRoom,
+        DockPressure,
+        DustBunnyRisk,
+        CrumbOrderChase,
+        NearCatch,
+        CatAtChokepoint,
+        LongRouteVsSafeRoute,
+        CentralIsland,
+        LureAwayFromCrumb,
+        LureAwayFromDock,
+        BacktrackBait,
+        MultiCorridorPursuit,
+        FurnitureDelay,
+        MultiCrumbRoutePlanning
+    }
+
     public enum FailureReason
     {
         None,
@@ -350,6 +374,8 @@ namespace DustBot
         public int engagementScore;
         public int strategicDepthScore;
         public int catPressureScore;
+        public CatPuzzleArchetype catPuzzleArchetype;
+        public int catFreeParMoves;
         public bool largeMaze;
         public bool advancedDevMaze;
         public DevMazeArchetype devMazeArchetype;
@@ -432,6 +458,8 @@ namespace DustBot
         public bool hasCatBehaviorOverride;
         public CatBehavior catBehaviorOverride;
         public bool useProceduralCatLayout;
+        public CatPuzzleArchetype catPuzzleArchetype;
+        public int catStartZone;
         public bool hasRouteModifierOverride;
         public RouteModifierStyle routeModifierStyle;
         public int routeModifierCountOverride;
@@ -466,6 +494,8 @@ namespace DustBot
         public int minimumBonusDetour;
         public int routeModifierCount;
         public CatBehavior catBehavior;
+        public CatPuzzleArchetype catPuzzleArchetype;
+        public int catStartZone;
         public RouteModifierStyle routeModifierStyle;
         public bool forcedRouteModifierStyle;
         public bool largeMaze;

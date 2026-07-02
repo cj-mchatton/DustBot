@@ -34,6 +34,22 @@ namespace DustBot
                 .Append("Strategic depth score: ").Append(report.strategicDepthScore).Append('\n')
                 .Append("Cat pressure: ").Append(report.catPressureScore).Append('\n')
                 .Append("Large maze: ").Append(level.largeMaze ? "yes" : "no").Append('\n');
+            if (level.cat != null && level.cat.IsEnabled)
+            {
+                CatStrategyReport cat = CatLevelVarietyEvaluator.Analyze(
+                    level,
+                    CatObstacleSimulator.BuildExpectedRoute(level));
+                builder
+                    .Append("Cat archetype: ").Append(level.catPuzzleArchetype).Append('\n')
+                    .Append("Cat strategy: pressure ").Append(cat.pressureScore)
+                    .Append(", reroute ").Append(cat.routeChangeMoves)
+                    .Append(", backtracks ").Append(cat.backtrackMoves)
+                    .Append(", near-catches ").Append(cat.nearCatchTurns)
+                    .Append(", chokepoints ").Append(cat.chokepoints)
+                    .Append(", loops ").Append(cat.loops)
+                    .Append(", safe pockets ").Append(cat.safePockets)
+                    .Append('\n');
+            }
             if (level.largeMaze)
             {
                 LargeMazeComplexityReport maze = LargeMazeEvaluator.Analyze(level);

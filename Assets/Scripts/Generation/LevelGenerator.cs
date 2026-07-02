@@ -21,7 +21,7 @@ namespace DustBot
                 throw new ArgumentNullException("entry");
             }
 
-            if (entry.generationVersion < 1 || entry.generationVersion > 7)
+            if (entry.generationVersion < 1 || entry.generationVersion > 8)
             {
                 throw new NotSupportedException(
                     "Unsupported DustBot generation version " + entry.generationVersion);
@@ -586,6 +586,12 @@ namespace DustBot
                 settings.routeModifierStyle = entry.routeModifierStyle;
                 settings.forcedRouteModifierStyle = true;
             }
+            settings.catPuzzleArchetype = entry.catPuzzleArchetype;
+            settings.catStartZone = entry.catStartZone;
+            if (settings.catBehavior != CatBehavior.None && entry.generationVersion >= 8)
+            {
+                ApplyCatArchetype(settings, entry.catPuzzleArchetype, area);
+            }
             return settings;
         }
 
@@ -738,13 +744,24 @@ namespace DustBot
             DeterministicRandom random = new DeterministicRandom(
                 string.Format(
                     CultureInfo.InvariantCulture,
-                    "{0}_v7_large_maze_{1}",
+                    "{0}_v8_large_maze_{1}",
                     entry.seed,
                     candidate));
             bool[,] floor = CarveDepthFirstMaze(
                 entry.boardWidth,
                 entry.boardHeight,
                 random);
+            int roomCount = Math.Max(1, entry.boardWidth * entry.boardHeight / 120);
+            CarveMazeRooms(floor, roomCount, random);
+            int loopCount = Math.Max(
+                settings.minimumMazeLoops + 2,
+                entry.boardWidth * entry.boardHeight / 48);
+            CarveMazeLoops(floor, loopCount, random);
+            CarvePlayableMazeEdges(
+                floor,
+                Math.Max(6, (entry.boardWidth + entry.boardHeight) / 5),
+                random);
+
             List<GridPosition> mainRoute = FindMazeDiameter(floor);
             if (mainRoute.Count < Math.Max(
                     8,
@@ -764,13 +781,6 @@ namespace DustBot
                                 bonusDetourCells,
                                 out bonusPosition);
 
-            int roomCount = Math.Max(1, entry.boardWidth * entry.boardHeight / 120);
-            CarveMazeRooms(floor, roomCount, random);
-            int loopCount = Math.Max(
-                settings.minimumMazeLoops + 2,
-                entry.boardWidth * entry.boardHeight / 48);
-            CarveMazeLoops(floor, loopCount, random);
-
             LevelDefinition level = new LevelDefinition
             {
                 id = string.Format(
@@ -788,6 +798,7 @@ namespace DustBot
                 height = entry.boardHeight,
                 hardPathLimit = settings.hardPathLimit,
                 archetype = entry.archetype,
+                catPuzzleArchetype = entry.catPuzzleArchetype,
                 testArchetype = entry.testArchetype,
                 dailyChallengeStyle = entry.dailyChallengeStyle,
                 masterCleanStyle = entry.masterCleanStyle,
@@ -1234,6 +1245,49 @@ namespace DustBot
                    position.y < floor.GetLength(1) - 1;
         }
 
+        private static void CarvePlayableMazeEdges(
+            bool[,] floor,
+            int targetCount,
+            DeterministicRandom random)
+        {
+            int width = floor.GetLength(0);
+            int height = floor.GetLength(1);
+            List<GridPosition> candidates = new List<GridPosition>();
+            for (int x = 1; x < width - 1; x++)
+            {
+                if (floor[x, 1]) candidates.Add(new GridPosition(x, 0));
+                if (floor[x, height - 2]) candidates.Add(new GridPosition(x, height - 1));
+            }
+
+            for (int y = 1; y < height - 1; y++)
+            {
+                if (floor[1, y]) candidates.Add(new GridPosition(0, y));
+                if (floor[width - 2, y]) candidates.Add(new GridPosition(width - 1, y));
+            }
+
+            random.Shuffle(candidates);
+            List<GridPosition> carved = new List<GridPosition>();
+            for (int i = 0; i < candidates.Count && carved.Count < targetCount; i++)
+            {
+                GridPosition candidate = candidates[i];
+                bool tooClose = false;
+                for (int j = 0; j < carved.Count; j++)
+                {
+                    if (Manhattan(candidate, carved[j]) <= 1)
+                    {
+                        tooClose = true;
+                        break;
+                    }
+                }
+
+                if (!tooClose)
+                {
+                    floor[candidate.x, candidate.y] = true;
+                    carved.Add(candidate);
+                }
+            }
+        }
+
         private static List<GridPosition> GeneratePath(
             LevelManifestEntry entry,
             LevelGenerationSettings settings,
@@ -1352,6 +1406,7 @@ namespace DustBot
                 threeStarMoveTarget = path.Count - 1,
                 hardPathLimit = settings.hardPathLimit,
                 archetype = entry.archetype,
+                catPuzzleArchetype = entry.catPuzzleArchetype,
                 testArchetype = entry.testArchetype,
                 dailyChallengeStyle = entry.dailyChallengeStyle,
                 masterCleanStyle = entry.masterCleanStyle,
@@ -1362,6 +1417,8 @@ namespace DustBot
 
             if (settings.catBehavior != CatBehavior.None)
             {
+                level.catPuzzleArchetype = settings.catPuzzleArchetype;
+                level.catFreeParMoves = path.Count - 1;
                 level.mechanicSet = "CatChaseTurns";
                 if (mode == GameMode.MainJourney && entry.levelNumber == 21)
                 {
@@ -1423,10 +1480,10 @@ namespace DustBot
 
             if (settings.catBehavior != CatBehavior.None)
             {
-                if (!TryPlaceCat(level, path, settings.catBehavior, decorationSalt))
+                if (!TryPlaceCat(level, path, settings, decorationSalt))
                 {
                     RelaxCatArena(level, path, decorationSalt);
-                    TryPlaceCat(level, path, settings.catBehavior, decorationSalt + 101);
+                    TryPlaceCat(level, path, settings, decorationSalt + 101);
                 }
             }
 
@@ -2215,7 +2272,7 @@ namespace DustBot
         private static bool TryPlaceCat(
             LevelDefinition level,
             List<GridPosition> route,
-            CatBehavior behavior,
+            LevelGenerationSettings settings,
             int decorationSalt)
         {
             HashSet<GridPosition> occupied = new HashSet<GridPosition>();
@@ -2247,9 +2304,6 @@ namespace DustBot
                     SeedVersion(level.generationVersion),
                     decorationSalt));
             random.Shuffle(candidates);
-            int layoutProfile = (int)(DeterministicRandom.StableHash(
-                level.seed + "_cat_layout_" + decorationSalt) % 15);
-
             GridPosition best = new GridPosition(-1, -1);
             List<SolutionStep> bestSolution = null;
             int bestScore = int.MinValue;
@@ -2259,7 +2313,7 @@ namespace DustBot
                 int routeIndex = NearestRouteIndex(candidates[i], route);
                 level.cat = new CatDefinition
                 {
-                    behavior = behavior,
+                    behavior = settings.catBehavior,
                     startPosition = candidates[i],
                     horizontalFirst = true
                 };
@@ -2290,6 +2344,15 @@ namespace DustBot
                     continue;
                 }
 
+                CatStrategyReport strategy = CatLevelVarietyEvaluator.Analyze(level, solvedRoute);
+                if (!CatLevelVarietyEvaluator.MatchesArchetype(
+                        level,
+                        settings.catPuzzleArchetype,
+                        strategy))
+                {
+                    continue;
+                }
+
                 int score =
                     Math.Min(10, relevance.pressureTurns) * 8 +
                     Math.Min(10, relevance.movementTurns) * 3 +
@@ -2301,7 +2364,9 @@ namespace DustBot
                         route,
                         candidates[i],
                         routeIndex,
-                        layoutProfile);
+                        settings.catPuzzleArchetype) +
+                    ScoreCatStartZone(level, candidates[i], settings.catStartZone) +
+                    strategy.pressureScore * 4;
                 if (score > bestScore)
                 {
                     bestScore = score;
@@ -2318,7 +2383,7 @@ namespace DustBot
 
             level.cat = new CatDefinition
             {
-                behavior = behavior,
+                behavior = settings.catBehavior,
                 startPosition = best,
                 horizontalFirst = true
             };
@@ -2340,7 +2405,7 @@ namespace DustBot
             List<GridPosition> route,
             GridPosition candidate,
             int routeIndex,
-            int layoutProfile)
+            CatPuzzleArchetype archetype)
         {
             int routeDistance = DistanceToRoute(candidate, route);
             int startDistance = Manhattan(candidate, route[0]);
@@ -2353,67 +2418,79 @@ namespace DustBot
             int score = Math.Max(0, 8 - routeDistance) +
                         Math.Max(0, 6 - Math.Abs(startDistance - 4));
 
-            switch (layoutProfile)
+            switch (archetype)
             {
-                case 0: // Corridor Trap
-                    score += openNeighbors <= 2 ? 12 : 0;
-                    score += middleRoute ? 5 : 0;
-                    break;
-                case 1: // Horizontal Priority Puzzle
+                case CatPuzzleArchetype.HorizontalPriorityTrap:
                     score += Math.Abs(candidate.y - route[Math.Max(0, routeIndex)].y) <= 1 ? 10 : 0;
                     score += Math.Abs(candidate.x - route[0].x) >= 3 ? 4 : 0;
                     break;
-                case 2: // Loop Around Furniture
+                case CatPuzzleArchetype.LoopAroundFurniture:
+                case CatPuzzleArchetype.CentralIsland:
                     score += nearTurn ? 12 : 0;
                     score += openNeighbors >= 2 ? 4 : 0;
                     break;
-                case 3: // Split Room
+                case CatPuzzleArchetype.CorridorDelay:
+                case CatPuzzleArchetype.MultiCorridorPursuit:
+                    score += openNeighbors <= 2 ? 12 : 0;
+                    score += middleRoute ? 5 : 0;
+                    break;
+                case CatPuzzleArchetype.SplitRoom:
                     score += routeDistance >= 2 && routeDistance <= 4 ? 10 : 0;
                     score += middleRoute ? 4 : 0;
                     break;
-                case 4: // Chokepoint Timing
+                case CatPuzzleArchetype.ChokepointTiming:
+                case CatPuzzleArchetype.CatAtChokepoint:
                     score += openNeighbors <= 2 ? 10 : 0;
                     score += routeDistance <= 2 ? 5 : 0;
                     break;
-                case 5: // Dust Bunny Risk
+                case CatPuzzleArchetype.DustBunnyRisk:
                     score += level.objectives.collectBonus &&
                              Manhattan(candidate, level.bonusPosition) <= 4 ? 14 : 0;
                     break;
-                case 6: // Cat Toy/Furniture Delay Scaffold
+                case CatPuzzleArchetype.FurnitureDelay:
                     score += DistanceToNearestContent(level, candidate, CellContent.Toy) <= 3 ? 10 : 0;
                     score += openNeighbors <= 3 ? 3 : 0;
                     break;
-                case 7: // Gate/Switch-style Chase, approximated by route commitment
-                    score += CountRouteModifiersNear(level, route, routeIndex, 4) > 0 ? 12 : 0;
-                    break;
-                case 8: // Crumb Order Chase
+                case CatPuzzleArchetype.CrumbOrderChase:
+                case CatPuzzleArchetype.MultiCrumbRoutePlanning:
+                case CatPuzzleArchetype.LureAwayFromCrumb:
                     score += crumbDistance <= 3 ? 12 : 0;
                     score += middleRoute ? 3 : 0;
                     break;
-                case 9: // Near-Catch Puzzle
+                case CatPuzzleArchetype.NearCatch:
                     score += startDistance <= 5 && routeDistance <= 2 ? 12 : 0;
                     break;
-                case 10: // Safe Pocket Puzzle
+                case CatPuzzleArchetype.SafePocket:
                     score += openNeighbors == 1 || openNeighbors == 2 ? 9 : 0;
                     score += nearTurn ? 4 : 0;
                     break;
-                case 11: // Long Route vs Safe Route
+                case CatPuzzleArchetype.LongRouteVsSafeRoute:
+                case CatPuzzleArchetype.BacktrackBait:
                     score += routeDistance >= 3 ? 9 : 0;
                     score += dockDistance >= 5 ? 4 : 0;
                     break;
-                case 12: // Around the Table
-                    score += nearTurn ? 8 : 0;
-                    score += DistanceToNearestContent(level, candidate, CellContent.Wall) <= 2 ? 7 : 0;
-                    break;
-                case 13: // Cat at Chokepoint
-                    score += openNeighbors <= 2 && routeDistance <= 2 ? 13 : 0;
-                    break;
-                default: // Dock Pressure
+                case CatPuzzleArchetype.DockPressure:
+                case CatPuzzleArchetype.LureAwayFromDock:
                     score += dockDistance <= 5 && routeIndex > route.Count / 2 ? 13 : 0;
                     break;
             }
 
             return score;
+        }
+
+        private static int ScoreCatStartZone(
+            LevelDefinition level,
+            GridPosition position,
+            int targetZone)
+        {
+            int horizontal = position.x * 3 < level.width
+                ? 0
+                : position.x * 3 >= level.width * 2 ? 2 : 1;
+            int vertical = position.y * 2 < level.height ? 0 : 1;
+            int zone = horizontal == 1
+                ? 4
+                : vertical * 2 + (horizontal == 2 ? 1 : 0);
+            return zone == targetZone ? 14 : 0;
         }
 
         private static int NearestRouteIndex(GridPosition position, List<GridPosition> route)
@@ -2491,6 +2568,68 @@ namespace DustBot
         private static int Manhattan(GridPosition a, GridPosition b)
         {
             return Math.Abs(a.x - b.x) + Math.Abs(a.y - b.y);
+        }
+
+        private static void ApplyCatArchetype(
+            LevelGenerationSettings settings,
+            CatPuzzleArchetype archetype,
+            int area)
+        {
+            int structuralBlockers = Math.Max(5, area / 7);
+            settings.blockerCount = Math.Max(settings.blockerCount, structuralBlockers);
+            settings.hazardCount = Math.Min(settings.hazardCount, 1);
+            settings.minimumCatPressureScore = Math.Max(
+                settings.minimumCatPressureScore,
+                7);
+            settings.minimumPathLength = Math.Max(
+                settings.minimumPathLength,
+                Math.Min(area - 5, Math.Max(11, area / 4)));
+            settings.maximumPathLength = Math.Max(
+                settings.maximumPathLength,
+                Math.Min(area - 3, settings.minimumPathLength + Math.Max(5, area / 10)));
+
+            switch (archetype)
+            {
+                case CatPuzzleArchetype.DustBunnyRisk:
+                    settings.includeBonus = true;
+                    settings.bonusRequiredForThreeStars = true;
+                    settings.crumbCount = Math.Max(2, settings.crumbCount);
+                    break;
+                case CatPuzzleArchetype.CrumbOrderChase:
+                    settings.crumbCount = Math.Max(2, settings.crumbCount);
+                    settings.minimumCrumbSpread = Math.Max(2, settings.minimumCrumbSpread);
+                    break;
+                case CatPuzzleArchetype.MultiCrumbRoutePlanning:
+                    settings.crumbCount = Math.Max(area >= 64 ? 4 : 3, settings.crumbCount);
+                    settings.minimumCrumbSpread = Math.Max(2, settings.minimumCrumbSpread);
+                    break;
+                case CatPuzzleArchetype.CorridorDelay:
+                case CatPuzzleArchetype.ChokepointTiming:
+                case CatPuzzleArchetype.SafePocket:
+                case CatPuzzleArchetype.SplitRoom:
+                case CatPuzzleArchetype.CatAtChokepoint:
+                case CatPuzzleArchetype.MultiCorridorPursuit:
+                    settings.blockerCount = Math.Max(settings.blockerCount, area / 5);
+                    break;
+                case CatPuzzleArchetype.LoopAroundFurniture:
+                case CatPuzzleArchetype.CentralIsland:
+                case CatPuzzleArchetype.FurnitureDelay:
+                    settings.blockerCount = Math.Max(settings.blockerCount, area / 6);
+                    break;
+                case CatPuzzleArchetype.DockPressure:
+                case CatPuzzleArchetype.LureAwayFromDock:
+                    settings.minimumPathLength = Math.Max(
+                        settings.minimumPathLength,
+                        Math.Min(area - 5, area / 3));
+                    break;
+                case CatPuzzleArchetype.BacktrackBait:
+                case CatPuzzleArchetype.LongRouteVsSafeRoute:
+                    settings.moveLimitSlack = Math.Max(3, settings.moveLimitSlack);
+                    break;
+            }
+
+            settings.blockerCount = Math.Min(area / 4, settings.blockerCount);
+            settings.crumbCount = Math.Min(area >= 64 ? 4 : 3, settings.crumbCount);
         }
 
         private static void ApplyArchetype(

@@ -189,7 +189,7 @@ namespace DustBot
                 return;
             }
 
-            SetZoom(level.advancedDevMaze ? overviewZoom : 1f);
+            SetZoom(overviewZoom);
             CenterOnCell(session != null ? session.BotPosition : level.Find(CellContent.Start));
         }
 
@@ -746,12 +746,7 @@ namespace DustBot
             float fitX = viewportRect.rect.width / Mathf.Max(1f, boardRect.rect.width);
             float fitY = viewportRect.rect.height / Mathf.Max(1f, boardRect.rect.height);
             minimumZoom = Mathf.Clamp(Mathf.Min(1f, fitX, fitY), 0.55f, 1f);
-            overviewZoom = level.advancedDevMaze
-                ? Mathf.Clamp(
-                    18f / Mathf.Max(level.width, level.height),
-                    minimumZoom,
-                    1f)
-                : 1f;
+            overviewZoom = minimumZoom;
             zoom = overviewZoom;
             boardRect.localScale = Vector3.one * zoom;
             CenterOnCell(session.BotPosition);

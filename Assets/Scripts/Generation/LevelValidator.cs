@@ -273,6 +273,26 @@ namespace DustBot
                     return false;
                 }
 
+                CatStrategyReport catStrategy =
+                    CatLevelVarietyEvaluator.Analyze(level, expectedRoute);
+                if (!CatLevelVarietyEvaluator.MatchesArchetype(
+                        level,
+                        level.catPuzzleArchetype,
+                        catStrategy))
+                {
+                    message = "The cat layout does not deliver its declared " +
+                              level.catPuzzleArchetype + " strategy.";
+                    return false;
+                }
+
+                if (level.catPuzzleArchetype != CatPuzzleArchetype.None &&
+                    catStrategy.pressureScore < 4)
+                {
+                    message = "The cat can be ignored; strategic pressure is " +
+                              catStrategy.pressureScore + "/4.";
+                    return false;
+                }
+
                 List<SolutionStep> verifiedSolution;
                 int searchLimit = level.moveLimit > 0
                     ? level.moveLimit
@@ -317,6 +337,8 @@ namespace DustBot
                 }
 
                 if (maze.tooOpen || maze.tooLinear || maze.tooTedious ||
+                    maze.fullBlockedPerimeter ||
+                    maze.playableEdgeCells < Math.Max(4, (level.width + level.height) / 6) ||
                     maze.score < minimumScore ||
                     maze.branches < Math.Max(3, area / 65) ||
                     maze.deadEnds < Math.Max(3, area / 85) ||
@@ -381,6 +403,8 @@ namespace DustBot
                 .Append(level.engagementScore.ToString(CultureInfo.InvariantCulture)).Append('|')
                 .Append(level.strategicDepthScore.ToString(CultureInfo.InvariantCulture)).Append('|')
                 .Append(level.catPressureScore.ToString(CultureInfo.InvariantCulture)).Append('|')
+                .Append((int)level.catPuzzleArchetype).Append(':')
+                .Append(level.catFreeParMoves.ToString(CultureInfo.InvariantCulture)).Append('|')
                 .Append(level.largeMaze ? '1' : '0').Append(':')
                 .Append(level.mazeComplexityScore.ToString(CultureInfo.InvariantCulture)).Append('|')
                 .Append(level.themeId).Append('|')

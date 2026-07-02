@@ -7,7 +7,7 @@ namespace DustBot
     {
         public const int MainJourneyLevelCount = 6000;
         public const int TutorialLevelCount = 3;
-        public const int CurrentGenerationVersion = 7;
+        public const int CurrentGenerationVersion = 8;
 
         public LevelManifestEntry GetMainEntry(int levelNumber)
         {
@@ -104,6 +104,19 @@ namespace DustBot
                 archetype,
                 false);
             entry.useLargeMaze = largeMaze;
+            if (levelNumber > 21 && !largeMaze)
+            {
+                bool useCat = ShouldUseCampaignCat(levelNumber);
+                entry.hasCatBehaviorOverride = true;
+                entry.catBehaviorOverride = useCat
+                    ? CatBehavior.Curious
+                    : CatBehavior.None;
+                entry.useProceduralCatLayout = useCat;
+                entry.catPuzzleArchetype = useCat
+                    ? SelectCatPuzzleArchetype(levelNumber)
+                    : CatPuzzleArchetype.None;
+                entry.catStartZone = useCat ? SelectCatStartZone(levelNumber) : -1;
+            }
             return entry;
         }
 
@@ -140,6 +153,18 @@ namespace DustBot
                 SelectChallengeArchetype(hash),
                 true);
             entry.useLargeMaze = largeMaze;
+            bool dailyCat = !largeMaze &&
+                            DeterministicRandom.StableHash(entry.seed + "_cat") % 10 < 7;
+            entry.hasCatBehaviorOverride = true;
+            entry.catBehaviorOverride = dailyCat
+                ? CatBehavior.Curious
+                : CatBehavior.None;
+            if (dailyCat)
+            {
+                entry.useProceduralCatLayout = true;
+                entry.catPuzzleArchetype = SelectCatPuzzleArchetype(entry.levelNumber);
+                entry.catStartZone = SelectCatStartZone(entry.levelNumber);
+            }
             return entry;
         }
 
@@ -149,7 +174,7 @@ namespace DustBot
             DifficultyTier tier = levelNumber < 5
                 ? DifficultyTier.Easy
                 : levelNumber < 15 ? DifficultyTier.Medium : DifficultyTier.Hard;
-            return CreateEntry(
+            LevelManifestEntry entry = CreateEntry(
                 levelNumber,
                 string.Format(CultureInfo.InvariantCulture, "DustBot_Endless_{0}_{1:0000}", runSeed, levelNumber),
                 tier,
@@ -157,6 +182,18 @@ namespace DustBot
                 levelNumber < 20 ? 7 : 8,
                 SelectChallengeArchetype(DeterministicRandom.StableHash(runSeed + "_" + levelNumber)),
                 false);
+            bool useCat = levelNumber >= 8 &&
+                          DeterministicRandom.StableHash(entry.seed + "_cat") % 10 < 7;
+            entry.hasCatBehaviorOverride = true;
+            entry.catBehaviorOverride = useCat
+                ? CatBehavior.Curious
+                : CatBehavior.None;
+            entry.useProceduralCatLayout = useCat;
+            entry.catPuzzleArchetype = useCat
+                ? SelectCatPuzzleArchetype(levelNumber)
+                : CatPuzzleArchetype.None;
+            entry.catStartZone = useCat ? SelectCatStartZone(levelNumber) : -1;
+            return entry;
         }
 
         private static LevelManifestEntry CreateEntry(
@@ -244,6 +281,55 @@ namespace DustBot
                    archetype == LevelArchetype.TightPath ||
                    archetype == LevelArchetype.TrickRoute ||
                    archetype == LevelArchetype.ChallengeRoute;
+        }
+
+        private static bool ShouldUseCampaignCat(int levelNumber)
+        {
+            if (levelNumber <= 35)
+            {
+                return levelNumber % 3 == 0 || levelNumber % 7 == 0;
+            }
+
+            // Large mazes are selected first. Of the remaining path levels,
+            // this stable cadence keeps cats frequent without creating runs.
+            return levelNumber % 4 != 0;
+        }
+
+        private static CatPuzzleArchetype SelectCatPuzzleArchetype(int levelNumber)
+        {
+            CatPuzzleArchetype[] choices =
+            {
+                CatPuzzleArchetype.HorizontalPriorityTrap,
+                CatPuzzleArchetype.LoopAroundFurniture,
+                CatPuzzleArchetype.CorridorDelay,
+                CatPuzzleArchetype.ChokepointTiming,
+                CatPuzzleArchetype.SafePocket,
+                CatPuzzleArchetype.SplitRoom,
+                CatPuzzleArchetype.DockPressure,
+                CatPuzzleArchetype.DustBunnyRisk,
+                CatPuzzleArchetype.CrumbOrderChase,
+                CatPuzzleArchetype.NearCatch,
+                CatPuzzleArchetype.CatAtChokepoint,
+                CatPuzzleArchetype.LongRouteVsSafeRoute,
+                CatPuzzleArchetype.CentralIsland,
+                CatPuzzleArchetype.LureAwayFromCrumb,
+                CatPuzzleArchetype.LureAwayFromDock,
+                CatPuzzleArchetype.BacktrackBait,
+                CatPuzzleArchetype.MultiCorridorPursuit,
+                CatPuzzleArchetype.FurnitureDelay,
+                CatPuzzleArchetype.MultiCrumbRoutePlanning
+            };
+
+            // A coprime stride walks every archetype before repeating. Since
+            // campaign cat gaps are much shorter than the 19-level cycle,
+            // the recent window cannot repeat an archetype.
+            int index = Math.Abs((levelNumber - 22) * 7) % choices.Length;
+            return choices[index];
+        }
+
+        private static int SelectCatStartZone(int levelNumber)
+        {
+            return Math.Abs((levelNumber - 22) * 3 + (levelNumber / 19)) % 5;
         }
     }
 }
