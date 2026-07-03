@@ -87,10 +87,20 @@ namespace DustBot
         public string LockReason(CosmeticDefinition definition)
         {
             if (definition.levelRequirement > 0 &&
-                progression.Data.highestUnlockedMainLevel - 1 < definition.levelRequirement)
+                progression.TotalCompleted < definition.levelRequirement)
             {
-                return "Reach Level " + definition.levelRequirement;
+                return "Complete " + definition.levelRequirement + " main levels";
             }
+
+            if (definition.categoryCompletionRequirement != LevelCategory.None &&
+                !progression.IsCategoryComplete(definition.categoryCompletionRequirement))
+                return "Complete " + LevelCategoryCatalog.Name(definition.categoryCompletionRequirement);
+
+            if (definition.catLevelCompletionRequirement > progression.CatLevelsCompleted)
+                return "Complete " + definition.catLevelCompletionRequirement + " cat levels";
+
+            if (definition.perfectCleanRequirement > progression.PerfectCleanCount)
+                return "Earn " + definition.perfectCleanRequirement + " Perfect Cleans";
 
             if (definition.starRequirement > progression.Data.totalStars)
             {
@@ -119,7 +129,7 @@ namespace DustBot
 
             if (definition.requiresMasterClean && !progression.IsMainJourneyComplete())
             {
-                return "Reach Master Clean";
+                return "Complete Expert to reach Master Clean";
             }
 
             return string.Empty;

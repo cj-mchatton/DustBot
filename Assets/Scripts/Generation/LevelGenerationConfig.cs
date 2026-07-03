@@ -45,14 +45,7 @@ namespace DustBot
 
         public static GenerationMode DefaultMode
         {
-            get
-            {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                return GenerationMode.DevelopmentCampaign;
-#else
-                return GenerationMode.ProductionCampaign;
-#endif
-            }
+            get { return GenerationMode.ProductionCampaign; }
         }
 
         public static GenerationMode ActiveMode
@@ -92,7 +85,7 @@ namespace DustBot
                 case GenerationMode.ObstacleTesting: return "OBSTACLE TESTING";
                 case GenerationMode.TutorialTesting: return "TUTORIAL TESTING";
                 case GenerationMode.MazeTesting: return "MAZE TESTING";
-                default: return "PRODUCTION CAMPAIGN";
+                default: return "PRODUCTION CATEGORIES";
             }
         }
     }

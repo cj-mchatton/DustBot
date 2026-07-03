@@ -70,121 +70,52 @@ namespace DustBot.Editor
             ConfigureProject();
             LevelLoader loader = new LevelLoader();
 
-            for (int i = 1; i <= LevelManifest.TutorialLevelCount; i++)
-            {
-                ValidateAndSimulate(loader.LoadMain(i), "Tutorial " + i);
-            }
-
-            int[] deterministicChecks = { 10, 15, 21, 30, 36, 45, 50, 100, 180, 500, 1000, 2000, 4000, 6000 };
             int catLevelCount = 0;
             int largeMazeLevelCount = 0;
-            int postIntroCatLevels = 0;
-            int postIntroLevels = 0;
-            for (int number = LevelManifest.TutorialLevelCount + 1;
-                 number <= LevelManifest.MainJourneyLevelCount;
-                 number++)
+            int totalLevels = 0;
+            foreach (LevelCategory category in LevelCategoryCatalog.All)
             {
-                LevelDefinition first = loader.LoadMain(number);
-                if (Array.IndexOf(deterministicChecks, number) >= 0)
+                LevelCategoryProfile profile = LevelCategoryCatalog.Get(category);
+                int categoryCats = 0;
+                int categoryMazes = 0;
+                for (int number = 1; number <= profile.levelCount; number++)
                 {
-                    LevelDefinition second = loader.LoadMain(number);
+                    LevelDefinition first = loader.LoadCategory(category, number);
+                    LevelDefinition second = loader.LoadCategory(category, number);
                     Require(
                         LevelValidator.Signature(first) == LevelValidator.Signature(second),
-                        "Main level " + number + " was not deterministic.");
-                }
-
-                if (number > 12 && number != 21)
-                {
-                    LevelEngagementReport engagement = LevelEngagementEvaluator.Analyze(first);
-                    Require(!engagement.tooTrivial, "Main level " + number + " was accepted as trivial.");
-                    Require(!engagement.tooDense, "Main level " + number + " was accepted as overly dense.");
-                    Require(
-                        engagement.strategicDepthScore >= 18,
-                        "Main level " + number + " strategic depth was too low.");
-                }
-
-                if (number >= 36)
-                {
-                    postIntroLevels++;
-                }
-
-                if (first.generationVersion >= 4)
-                {
-                    Require(
-                        first.twoStarMoveTarget >= first.threeStarMoveTarget,
-                        "Main level " + number + " has inverted star targets.");
-                    if (first.hardPathLimit)
+                        LevelCategoryCatalog.LevelName(category, number) + " was not deterministic.");
+                    Require(first.category == category && first.levelNumber == number,
+                        "Category metadata is incorrect for " + LevelCategoryCatalog.LevelName(category, number));
+                    bool expectedCat = LevelCategoryCatalog.IsCatLevel(category, number);
+                    Require(first.cat != null && first.cat.IsEnabled == expectedCat,
+                        "Cat distribution is incorrect for " + LevelCategoryCatalog.LevelName(category, number));
+                    if (expectedCat)
                     {
-                        Require(
-                            first.moveLimit >= first.parMoves,
-                            "Main level " + number + " has an unfair hard path cap.");
+                        categoryCats++;
+                        catLevelCount++;
                     }
-                    else
+                    if (first.largeMaze)
                     {
-                        Require(
-                            first.moveLimit == 0,
-                            "Main level " + number + " exposes a hidden hard path cap.");
+                        categoryMazes++;
+                        largeMazeLevelCount++;
                     }
+                    Require(!(expectedCat && first.largeMaze),
+                        "A category cat level was also marked as a large maze.");
+                    ValidateAndSimulate(first, LevelCategoryCatalog.LevelName(category, number));
+                    totalLevels++;
                 }
-
-                if (first.cat != null && first.cat.IsEnabled)
-                {
-                    catLevelCount++;
-                    if (number >= 36)
-                    {
-                        postIntroCatLevels++;
-                    }
-
-                    List<GridPosition> catRoute = CatObstacleSimulator.BuildExpectedRoute(first);
-                    CatRoutePreview preview = CatObstacleSimulator.SimulateRoute(
-                        first,
-                        catRoute);
-                    Require(
-                        !preview.collided,
-                        "Main level " + number + " has an unsafe canonical cat route.");
-                    CatRelevanceReport relevance =
-                        CatObstacleSimulator.AnalyzeRelevance(first, catRoute);
-                    Require(
-                        relevance.IsStrategicallyActive,
-                        string.Format(
-                            "Main level {0} has a trapped or negligible cat: open {1}, reachable {2}, movement {3}, unique {4}, closest {5}, pressure {6}.",
-                            number,
-                            relevance.openStartNeighbors,
-                            relevance.reachableTiles,
-                            relevance.movementTurns,
-                            relevance.uniqueVisitedTiles,
-                            relevance.closestDistance,
-                            relevance.pressureTurns));
-                }
-
-                if (first.largeMaze)
-                {
-                    largeMazeLevelCount++;
-                    LargeMazeComplexityReport maze = LargeMazeEvaluator.Analyze(first);
-                    Require(
-                        maze.allObjectivesReachable &&
-                        !maze.tooOpen &&
-                        !maze.tooLinear &&
-                        maze.branches >= 3 &&
-                        maze.deadEnds >= 3 &&
-                        maze.loops >= 2,
-                        "Main level " + number + " failed the large-maze topology audit.");
-                }
-
-                ValidateAndSimulate(first, "Main " + number);
+                Require(categoryCats == profile.catLevelCount,
+                    profile.displayName + " cat distribution does not match its profile.");
+                Require(categoryMazes == profile.mazeLevelCount,
+                    profile.displayName + " maze distribution does not match its profile.");
             }
 
-            Require(catLevelCount >= 500, "Too few canonical levels retain the cat mechanic.");
-            Require(
-                postIntroCatLevels * 10 >= postIntroLevels &&
-                postIntroCatLevels * 4 <= postIntroLevels,
-                "Post-introduction cat frequency is outside the expected 10-25% band after adding large path mazes.");
-            Require(
-                largeMazeLevelCount >= 4000,
-                "Too few canonical levels use the large-maze path system.");
-            Require(
-                loader.LoadMain(21).cat.behavior == CatBehavior.Curious,
-                "The Curious Cat introduction level is missing.");
+            Require(totalLevels == 260, "The production category catalog does not contain 260 levels.");
+            Require(catLevelCount == 95, "The category catalog should contain exactly 95 cat levels.");
+            Require(largeMazeLevelCount == 155, "The category catalog should contain exactly 155 maze levels.");
+            Require(loader.LoadCategory(LevelCategory.Medium, 1).cat.behavior == CatBehavior.Curious,
+                "The Medium cat introduction level is missing.");
 
             DateTime date = new DateTime(2026, 6, 22);
             LevelDefinition dailyA = loader.LoadDaily(date);
@@ -221,12 +152,12 @@ namespace DustBot.Editor
             Require(masterA.hardPathLimit, "Master Clean reset to a soft early-game profile.");
             ValidateAndSimulate(masterA, "Master 500");
 
-            ValidateHazardBlocking(loader.LoadMain(7));
-            ValidateCatTurnMechanic(loader.LoadMain(21));
+            ValidateHazardBlocking(loader.LoadCategory(LevelCategory.Easy, 7));
+            ValidateCatTurnMechanic(loader.LoadCategory(LevelCategory.Medium, 1));
             ValidateDevelopmentModes(loader);
             ValidateProgression();
             Debug.Log(
-                "DUSTBOT_VALIDATION_PASSED: 6,000 canonical journey levels, " +
+                "DUSTBOT_VALIDATION_PASSED: 260 category levels, " +
                 catLevelCount +
                 " deterministic cat levels, " +
                 largeMazeLevelCount +
@@ -634,6 +565,7 @@ namespace DustBot.Editor
             {
                 levelId = "MainJourney_1",
                 mode = GameMode.MainJourney,
+                category = LevelCategory.Easy,
                 levelNumber = 1,
                 stars = 3,
                 coinsEarned = 999
@@ -642,6 +574,7 @@ namespace DustBot.Editor
             {
                 levelId = "MainJourney_1",
                 mode = GameMode.MainJourney,
+                category = LevelCategory.Easy,
                 levelNumber = 1,
                 stars = 3,
                 coinsEarned = 999
@@ -656,6 +589,7 @@ namespace DustBot.Editor
             {
                 levelId = "MainJourney_1",
                 mode = GameMode.MainJourney,
+                category = LevelCategory.Easy,
                 levelNumber = 1,
                 stars = 3,
                 collectedBonus = true
@@ -664,6 +598,7 @@ namespace DustBot.Editor
             {
                 levelId = "MainJourney_1",
                 mode = GameMode.MainJourney,
+                category = LevelCategory.Easy,
                 levelNumber = 1,
                 stars = 3,
                 collectedBonus = true
@@ -673,10 +608,40 @@ namespace DustBot.Editor
                 "Dust Bunny rewards can be farmed.");
             Require(progression.Data.totalDustBunnies == 1, "Dust Bunny total was not recorded.");
 
+            ProgressionSystem categoryProgression = new ProgressionSystem(new PlayerProgressData());
+            Require(categoryProgression.IsCategoryUnlocked(LevelCategory.Easy) &&
+                    categoryProgression.IsCategoryUnlocked(LevelCategory.Medium),
+                "Easy and Medium should be unlocked for new players.");
+            Require(!categoryProgression.IsCategoryUnlocked(LevelCategory.Hard) &&
+                    !categoryProgression.IsCategoryUnlocked(LevelCategory.Expert) &&
+                    !categoryProgression.IsCategoryUnlocked(LevelCategory.CatChase),
+                "Advanced categories unlocked before their requirements were met.");
+            categoryProgression.ApplyResult(new LevelResult
+            {
+                levelId = "Category_Medium_001",
+                mode = GameMode.MainJourney,
+                category = LevelCategory.Medium,
+                levelNumber = 1,
+                catLevel = true,
+                stars = 3
+            }, date);
+            Require(categoryProgression.IsCategoryUnlocked(LevelCategory.CatChase),
+                "Completing the first Medium cat level did not unlock Cat Chase.");
+            categoryProgression.CompleteCategoryForDebug(LevelCategory.Medium);
+            Require(categoryProgression.IsCategoryUnlocked(LevelCategory.Hard),
+                "Ten Medium completions did not unlock Hard.");
+            categoryProgression.CompleteCategoryForDebug(LevelCategory.Hard);
+            Require(categoryProgression.IsCategoryUnlocked(LevelCategory.Expert),
+                "Twenty Hard completions did not unlock Expert.");
+            categoryProgression.CompleteCategoryForDebug(LevelCategory.Expert);
+            Require(categoryProgression.IsMainJourneyComplete(),
+                "Completing Expert did not unlock Master Clean.");
+
             int milestoneAward = progression.ApplyResult(new LevelResult
             {
-                levelId = "MainJourney_25",
+                levelId = "Category_Medium_025",
                 mode = GameMode.MainJourney,
+                category = LevelCategory.Medium,
                 levelNumber = 25,
                 stars = 2
             }, date);

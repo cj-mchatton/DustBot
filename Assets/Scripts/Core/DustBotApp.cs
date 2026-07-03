@@ -18,16 +18,13 @@ namespace DustBot
         public HapticsManager Haptics { get; private set; }
         public UIManager UI { get; private set; }
         public int CurrentCampaignLevel { get; private set; } = 1;
+        public LevelCategory CurrentCategory { get; private set; } = LevelCategory.Easy;
         public LevelDefinition CurrentLevel { get; private set; }
         public bool CanAccessMasterClean
         {
             get
             {
-#if UNITY_EDITOR || DEVELOPMENT_BUILD
-                return true;
-#else
                 return Progression != null && Progression.IsMainJourneyComplete();
-#endif
             }
         }
 
@@ -63,9 +60,45 @@ namespace DustBot
 
         public void StartMainLevel(int levelNumber)
         {
+            if (Levels.ActiveGenerationMode == GenerationMode.ProductionCampaign)
+            {
+                StartCategoryLevel(CurrentCategory, levelNumber);
+                return;
+            }
             CurrentCampaignLevel = Math.Max(1, Math.Min(Levels.CampaignLevelCount, levelNumber));
             CurrentLevel = Levels.LoadCampaign(CurrentCampaignLevel);
             UI.ShowGame(CurrentLevel);
+        }
+
+        public void StartCategoryLevel(LevelCategory category, int levelNumber)
+        {
+            if (!Progression.IsCategoryUnlocked(category))
+            {
+                UI.ShowCategoryLockedMessage(category);
+                return;
+            }
+
+            CurrentCategory = category;
+            CurrentCampaignLevel = LevelCategoryCatalog.ClampLevel(category, levelNumber);
+            Progression.Data.lastPlayedCategory = category;
+            Progression.Data.lastPlayedLevel = CurrentCampaignLevel;
+            SaveNow();
+            CurrentLevel = Levels.LoadCategory(category, CurrentCampaignLevel);
+            UI.ShowGame(CurrentLevel);
+        }
+
+        public void StartRecommendedLevel()
+        {
+            LevelCategory category = Progression.Data.lastPlayedCategory;
+            if (!Progression.IsCategoryUnlocked(category)) category = LevelCategory.Easy;
+            StartCategoryLevel(category, Progression.NextUnfinishedLevel(category));
+        }
+
+        public void NextCategoryLevel()
+        {
+            int count = LevelCategoryCatalog.Count(CurrentCategory);
+            if (CurrentCampaignLevel < count) StartCategoryLevel(CurrentCategory, CurrentCampaignLevel + 1);
+            else UI.ShowCategorySelect();
         }
 
         public void StartDaily()
@@ -131,34 +164,29 @@ namespace DustBot
         public void DebugUnlockCampaignAndMaster()
         {
             if (!LevelGenerationConfig.DeveloperToolsEnabled) return;
-            PlayerProgressData data = Progression.Data;
-            data.highestUnlockedMainLevel = LevelManifest.MainJourneyLevelCount;
-            bool foundFinal = false;
-            for (int i = 0; i < data.mainLevels.Count; i++)
-            {
-                if (data.mainLevels[i].levelNumber == LevelManifest.MainJourneyLevelCount)
-                {
-                    data.mainLevels[i].completed = true;
-                    if (data.mainLevels[i].stars <= 0)
-                    {
-                        data.totalStars++;
-                    }
-                    data.mainLevels[i].stars = Math.Max(1, data.mainLevels[i].stars);
-                    foundFinal = true;
-                    break;
-                }
-            }
+            foreach (LevelCategory category in LevelCategoryCatalog.All)
+                Progression.CompleteCategoryForDebug(category);
+            SaveNow();
+        }
 
-            if (!foundFinal)
-            {
-                data.mainLevels.Add(new LevelProgressRecord
-                {
-                    levelNumber = LevelManifest.MainJourneyLevelCount,
-                    completed = true,
-                    stars = 1
-                });
-                data.totalStars++;
-            }
+        public void DebugCompleteCategory(LevelCategory category)
+        {
+            if (!LevelGenerationConfig.DeveloperToolsEnabled) return;
+            Progression.CompleteCategoryForDebug(category);
+            SaveNow();
+        }
+
+        public void DebugSelectCategory(LevelCategory category)
+        {
+            if (!LevelGenerationConfig.DeveloperToolsEnabled) return;
+            CurrentCategory = category;
+            CurrentCampaignLevel = Math.Min(CurrentCampaignLevel, LevelCategoryCatalog.Count(category));
+        }
+
+        public void DebugResetCategory(LevelCategory category)
+        {
+            if (!LevelGenerationConfig.DeveloperToolsEnabled) return;
+            Progression.ResetCategory(category);
             SaveNow();
         }
 
@@ -273,7 +301,7 @@ namespace DustBot
             UI.ShowLevelSelect(0);
             yield return CaptureAfterLayout(Path.Combine(path, "02-level-select.png"));
 
-            UI.ShowGame(Levels.LoadMain(15));
+            UI.ShowGame(Levels.LoadCategory(LevelCategory.Medium, 10));
             yield return null;
             GameScreen journey = UnityEngine.Object.FindAnyObjectByType<GameScreen>();
             if (journey != null)
@@ -338,15 +366,33 @@ namespace DustBot
                 "path_coral"
             };
             data.mainLevels = new List<LevelProgressRecord>();
+            data.categoryLevels = new List<LevelProgressRecord>();
+            data.lastPlayedCategory = LevelCategory.Medium;
+            data.lastPlayedLevel = 15;
             data.totalStars = 0;
-            for (int levelNumber = 1; levelNumber <= 24; levelNumber++)
+            for (int levelNumber = 1; levelNumber <= 10; levelNumber++)
             {
                 int stars = 1 + levelNumber % 3;
-                data.mainLevels.Add(new LevelProgressRecord
+                data.categoryLevels.Add(new LevelProgressRecord
                 {
+                    category = LevelCategory.Easy,
                     levelNumber = levelNumber,
                     stars = stars,
                     completed = true,
+                    dustBunnyCollected = levelNumber % 6 == 0
+                });
+                data.totalStars += stars;
+            }
+            for (int levelNumber = 1; levelNumber <= 14; levelNumber++)
+            {
+                int stars = 1 + levelNumber % 3;
+                data.categoryLevels.Add(new LevelProgressRecord
+                {
+                    category = LevelCategory.Medium,
+                    levelNumber = levelNumber,
+                    stars = stars,
+                    completed = true,
+                    catLevel = LevelCategoryCatalog.IsCatLevel(LevelCategory.Medium, levelNumber),
                     dustBunnyCollected = levelNumber % 6 == 0
                 });
                 data.totalStars += stars;

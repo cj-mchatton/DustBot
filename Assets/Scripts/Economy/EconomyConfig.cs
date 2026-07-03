@@ -73,6 +73,9 @@ namespace DustBot
         public int noHintDailyRequirement;
         public int streakRequirement;
         public bool requiresMasterClean;
+        public LevelCategory categoryCompletionRequirement;
+        public int catLevelCompletionRequirement;
+        public int perfectCleanRequirement;
         public string colorHex;
         public string secondaryColorHex;
         public string[] bundleItemIds;
@@ -113,13 +116,13 @@ namespace DustBot
         {
             Item(DefaultBot, "Classic DustBot", CosmeticCategory.BotSkin, CosmeticRarity.Common, 0, "#FFFFFF"),
             Item("bot_gold", "Gold DustBot", CosmeticCategory.BotSkin, CosmeticRarity.Legendary, 10000, "#FFE09A", stars: 300),
-            Item("bot_midnight", "Midnight DustBot", CosmeticCategory.BotSkin, CosmeticRarity.Rare, 2500, "#61708D", level: 100),
+            Item("bot_midnight", "Midnight DustBot", CosmeticCategory.BotSkin, CosmeticRarity.Rare, 2500, "#61708D", categoryComplete: LevelCategory.Medium),
             Item("bot_bubblegum", "Bubblegum DustBot", CosmeticCategory.BotSkin, CosmeticRarity.Uncommon, 1000, "#FFB5D8", bunnies: 15),
             Item("bot_honey", "Honey Polish", CosmeticCategory.BotSkin, CosmeticRarity.Uncommon, 750, "#FFE2A0"),
             Item("bot_lavender", "Bunny Lavender", CosmeticCategory.BotSkin, CosmeticRarity.Rare, 2000, "#E5D6FF", bunnies: 10),
-            Item("bot_rusty", "Rusty DustBot", CosmeticCategory.BotSkin, CosmeticRarity.Common, 500, "#C48B68", level: 50),
-            Item("bot_space", "Space DustBot", CosmeticCategory.BotSkin, CosmeticRarity.Epic, 6500, "#B9C8FF", level: 500),
-            Item("bot_cat", "Cat-Eared DustBot", CosmeticCategory.BotSkin, CosmeticRarity.Epic, 5000, "#FFE0C2", bunnies: 50),
+            Item("bot_rusty", "Rusty DustBot", CosmeticCategory.BotSkin, CosmeticRarity.Common, 500, "#C48B68", categoryComplete: LevelCategory.Easy),
+            Item("bot_space", "Space DustBot", CosmeticCategory.BotSkin, CosmeticRarity.Epic, 6500, "#B9C8FF", categoryComplete: LevelCategory.Hard),
+            Item("bot_cat", "Cat-Eared DustBot", CosmeticCategory.BotSkin, CosmeticRarity.Epic, 5000, "#FFE0C2", catLevels: 25),
             Item("bot_frog", "FrogBot", CosmeticCategory.BotSkin, CosmeticRarity.Rare, 3000, "#A9E79A", bunnies: 25),
             Item("bot_retro", "Retro Vacuum", CosmeticCategory.BotSkin, CosmeticRarity.Rare, 3250, "#F4C06A", daily: 7),
             Item("bot_arcade", "Arcade DustBot", CosmeticCategory.BotSkin, CosmeticRarity.Epic, 7500, "#C5A1FF", stars: 500),
@@ -131,14 +134,14 @@ namespace DustBot
             Item("path_neon", "Neon Purple", CosmeticCategory.PathColor, CosmeticRarity.Rare, 3500, "#A85CFF", daily: 5),
             Item("path_gold", "Gold Trail", CosmeticCategory.PathColor, CosmeticRarity.Epic, 7000, "#F4BE38", stars: 350),
             Item("path_bubble", "Bubble Trail", CosmeticCategory.PathColor, CosmeticRarity.Rare, 2500, "#6DD6E7", bunnies: 35),
-            Item("path_space", "Space Trail", CosmeticCategory.PathColor, CosmeticRarity.Epic, 8000, "#6A7EFF", level: 1000),
-            Item("path_rainbow", "Rainbow Trail", CosmeticCategory.PathColor, CosmeticRarity.Legendary, 20000, "#F36D80", stars: 1000),
+            Item("path_space", "Space Trail", CosmeticCategory.PathColor, CosmeticRarity.Epic, 8000, "#6A7EFF", categoryComplete: LevelCategory.Expert),
+            Item("path_rainbow", "Rainbow Trail", CosmeticCategory.PathColor, CosmeticRarity.Legendary, 20000, "#F36D80", stars: 700),
 
             Item(DefaultTileTheme, "Cozy Kitchen", CosmeticCategory.TileTheme, CosmeticRarity.Common, 0, "#F6EFE0", "#EDE4D0"),
             Item("tile_living", "Living Room", CosmeticCategory.TileTheme, CosmeticRarity.Common, 500, "#EEDDC6", "#DFC9AC"),
             Item("tile_bathroom", "Bathroom Tile", CosmeticCategory.TileTheme, CosmeticRarity.Uncommon, 1000, "#E1F1F4", "#CDE4E9", level: 100),
             Item("tile_arcade", "Arcade Floor", CosmeticCategory.TileTheme, CosmeticRarity.Rare, 3000, "#2F3558", "#454D7B", daily: 5),
-            Item("tile_space", "Space Station", CosmeticCategory.TileTheme, CosmeticRarity.Epic, 8000, "#303B59", "#212B44", level: 250),
+            Item("tile_space", "Space Station", CosmeticCategory.TileTheme, CosmeticRarity.Epic, 8000, "#303B59", "#212B44", categoryComplete: LevelCategory.Hard),
             Item("tile_garden", "Garden Patio", CosmeticCategory.TileTheme, CosmeticRarity.Rare, 2250, "#DCE8CB", "#C8DAB2", bunnies: 30),
             Item("tile_garage", "Garage Floor", CosmeticCategory.TileTheme, CosmeticRarity.Uncommon, 1250, "#D7D5CE", "#C2C1BB", level: 200),
             Item("tile_candy", "Candy Room", CosmeticCategory.TileTheme, CosmeticRarity.Epic, 6000, "#FFE0EE", "#DCCBFF", stars: 500),
@@ -147,8 +150,8 @@ namespace DustBot
             Item("dock_gold", "Gold Dock", CosmeticCategory.DockDesign, CosmeticRarity.Rare, 3000, "#FFD875", stars: 200),
             Item("dock_neon", "Neon Dock", CosmeticCategory.DockDesign, CosmeticRarity.Rare, 3500, "#BC8BFF", daily: 7),
             Item("dock_wood", "Wooden Dock", CosmeticCategory.DockDesign, CosmeticRarity.Uncommon, 1000, "#C58C62", level: 100),
-            Item("dock_space", "Space Dock", CosmeticCategory.DockDesign, CosmeticRarity.Epic, 7000, "#9FB6FF", level: 750),
-            Item("dock_catbed", "Cat Bed Dock", CosmeticCategory.DockDesign, CosmeticRarity.Epic, 5500, "#FFD3C4", bunnies: 50),
+            Item("dock_space", "Space Dock", CosmeticCategory.DockDesign, CosmeticRarity.Epic, 7000, "#9FB6FF", categoryComplete: LevelCategory.Expert),
+            Item("dock_catbed", "Cat Bed Dock", CosmeticCategory.DockDesign, CosmeticRarity.Epic, 5500, "#FFD3C4", catLevels: 50),
 
             Item(DefaultWinAnimation, "Sparkle Clean", CosmeticCategory.WinAnimation, CosmeticRarity.Common, 0, "#F7C657"),
             Item("win_confetti", "Confetti Burst", CosmeticCategory.WinAnimation, CosmeticRarity.Uncommon, 1000, "#F58B79", level: 75),
@@ -161,14 +164,14 @@ namespace DustBot
             Item("room_kitchen", "Bright Kitchen", CosmeticCategory.RoomBackground, CosmeticRarity.Common, 500, "#FFF0B8", "#F7C657", level: 50),
             Item("room_candy", "Candy Room", CosmeticCategory.RoomBackground, CosmeticRarity.Uncommon, 900, "#FFE0EE", "#BFA7FF", stars: 100),
             Item("room_bathroom", "Bathroom Tile", CosmeticCategory.RoomBackground, CosmeticRarity.Uncommon, 1100, "#D8F4FF", "#8FD6EA", level: 150),
-            Item("room_garage", "Garage Workshop", CosmeticCategory.RoomBackground, CosmeticRarity.Rare, 2500, "#6F746F", "#C88B4A", level: 500),
+            Item("room_garage", "Garage Workshop", CosmeticCategory.RoomBackground, CosmeticRarity.Rare, 2500, "#6F746F", "#C88B4A", categoryComplete: LevelCategory.Hard),
             Item("room_arcade", "Arcade Room", CosmeticCategory.RoomBackground, CosmeticRarity.Epic, 7000, "#242947", "#C45CFF", daily: 14),
-            Item("room_space", "Space Station", CosmeticCategory.RoomBackground, CosmeticRarity.Legendary, 15000, "#171F38", "#6A7EFF", level: 2000, master: true),
+            Item("room_space", "Space Station", CosmeticCategory.RoomBackground, CosmeticRarity.Legendary, 15000, "#171F38", "#6A7EFF", categoryComplete: LevelCategory.Expert, master: true),
             Item("room_cabin", "Cozy Cabin", CosmeticCategory.RoomBackground, CosmeticRarity.Rare, 3000, "#7A4E2D", "#F0D7B2", streak: 7),
 
             Bundle("bundle_gold", "Gold Bundle", CosmeticRarity.Legendary, 16000, new[] { "bot_gold", "path_gold", "dock_gold", "win_coins" }, stars: 500),
             Bundle("bundle_neon", "Neon Bundle", CosmeticRarity.Epic, 10000, new[] { "path_neon", "tile_arcade", "dock_neon" }, daily: 10),
-            Bundle("bundle_space", "Space Bundle", CosmeticRarity.Legendary, 18000, new[] { "bot_space", "path_space", "tile_space", "dock_space", "room_space" }, level: 2000, master: true),
+            Bundle("bundle_space", "Space Bundle", CosmeticRarity.Legendary, 18000, new[] { "bot_space", "path_space", "tile_space", "dock_space", "room_space" }, level: 260, master: true),
             Bundle("bundle_cozy", "Cozy Bundle", CosmeticRarity.Rare, 4500, new[] { "tile_living", "dock_wood", "room_cabin" }, streak: 7),
             Bundle("bundle_cat", "Cat Bundle", CosmeticRarity.Epic, 8500, new[] { "bot_cat", "dock_catbed" }, bunnies: 75),
             Bundle("bundle_arcade", "Arcade Bundle", CosmeticRarity.Legendary, 14000, new[] { "bot_arcade", "tile_arcade", "room_arcade" }, stars: 750)
@@ -220,7 +223,10 @@ namespace DustBot
             int daily = 0,
             int noHintDaily = 0,
             int streak = 0,
-            bool master = false)
+            bool master = false,
+            LevelCategory categoryComplete = LevelCategory.None,
+            int catLevels = 0,
+            int perfectCleans = 0)
         {
             return new CosmeticDefinition
             {
@@ -237,7 +243,10 @@ namespace DustBot
                 dailyCompletionRequirement = daily,
                 noHintDailyRequirement = noHintDaily,
                 streakRequirement = streak,
-                requiresMasterClean = master
+                requiresMasterClean = master,
+                categoryCompletionRequirement = categoryComplete,
+                catLevelCompletionRequirement = catLevels,
+                perfectCleanRequirement = perfectCleans
             };
         }
 

@@ -114,6 +114,7 @@ namespace DustBot
                     entry.levelNumber),
                 mode = mode,
                 generationMode = entry.generationMode,
+                category = entry.category,
                 levelNumber = entry.levelNumber,
                 seed = entry.seed,
                 generationVersion = entry.generationVersion,

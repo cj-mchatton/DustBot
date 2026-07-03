@@ -832,14 +832,18 @@ namespace DustBot
             switch (level.mode)
             {
                 case GameMode.MainJourney:
-                    if (level.levelNumber >= LevelManifest.MainJourneyLevelCount)
+                    if (level.category != LevelCategory.None)
+                    {
+                        if (level.levelNumber >= LevelCategoryCatalog.Count(level.category))
+                            app.UI.ShowCategorySelect();
+                        else
+                            app.StartCategoryLevel(level.category, level.levelNumber + 1);
+                    }
+                    else if (level.levelNumber >= LevelManifest.MainJourneyLevelCount)
                     {
                         app.StartMaster();
                     }
-                    else
-                    {
-                        app.StartMainLevel(level.levelNumber + 1);
-                    }
+                    else app.StartMainLevel(level.levelNumber + 1);
                     break;
                 case GameMode.MasterClean:
                     app.UI.ShowGame(app.Levels.LoadMaster(level.levelNumber + 1));
@@ -1013,6 +1017,9 @@ namespace DustBot
                 string prefix = definition.cat != null && definition.cat.IsEnabled ? "CAT TEST" : "DEV LEVEL";
                 return prefix + " " + definition.levelNumber;
             }
+
+            if (definition.mode == GameMode.MainJourney && definition.category != LevelCategory.None)
+                return LevelCategoryCatalog.LevelName(definition.category, definition.levelNumber);
 
             if (definition.cat != null && definition.cat.IsEnabled)
             {
@@ -1260,6 +1267,12 @@ namespace DustBot
 
         private string NextLevelText()
         {
+            if (level.mode == GameMode.MainJourney && level.category != LevelCategory.None)
+            {
+                if (level.levelNumber < LevelCategoryCatalog.Count(level.category))
+                    return "\n" + LevelCategoryCatalog.LevelName(level.category, level.levelNumber + 1) + " is ready.";
+                return "\n" + LevelCategoryCatalog.Name(level.category) + " complete.";
+            }
             int campaignCount = level.generationMode == GenerationMode.ProductionCampaign
                 ? LevelManifest.MainJourneyLevelCount
                 : app.Levels.CampaignLevelCount;
@@ -1293,6 +1306,10 @@ namespace DustBot
             {
                 return "DONE";
             }
+
+            if (level.mode == GameMode.MainJourney && level.category != LevelCategory.None &&
+                level.levelNumber >= LevelCategoryCatalog.Count(level.category))
+                return "CATEGORIES";
 
             if (level.mode == GameMode.MainJourney &&
                 level.levelNumber >= LevelManifest.MainJourneyLevelCount)

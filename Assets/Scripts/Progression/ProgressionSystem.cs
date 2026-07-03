@@ -16,19 +16,134 @@ namespace DustBot
 
         public int GetStars(int levelNumber)
         {
-            LevelProgressRecord record = FindMainRecord(levelNumber);
+            LevelProgressRecord record = FindRecord(LevelCategory.Easy, levelNumber);
+            return record == null ? 0 : record.stars;
+        }
+
+        public int GetStars(LevelCategory category, int levelNumber)
+        {
+            LevelProgressRecord record = FindRecord(category, levelNumber);
             return record == null ? 0 : record.stars;
         }
 
         public bool HasDustBunny(int levelNumber)
         {
-            LevelProgressRecord record = FindMainRecord(levelNumber);
+            LevelProgressRecord record = FindRecord(LevelCategory.Easy, levelNumber);
             return record != null && record.dustBunnyCollected;
+        }
+
+        public bool HasDustBunny(LevelCategory category, int levelNumber)
+        {
+            LevelProgressRecord record = FindRecord(category, levelNumber);
+            return record != null && record.dustBunnyCollected;
+        }
+
+        public bool HasPerfectClean(LevelCategory category, int levelNumber)
+        {
+            LevelProgressRecord record = FindRecord(category, levelNumber);
+            return record != null && record.perfectClean;
+        }
+
+        public int CompletedCount(LevelCategory category)
+        {
+            int count = 0;
+            for (int i = 0; i < Data.categoryLevels.Count; i++)
+                if (Data.categoryLevels[i].category == category && Data.categoryLevels[i].completed) count++;
+            return count;
+        }
+
+        public int StarsInCategory(LevelCategory category)
+        {
+            int stars = 0;
+            for (int i = 0; i < Data.categoryLevels.Count; i++)
+                if (Data.categoryLevels[i].category == category) stars += Data.categoryLevels[i].stars;
+            return stars;
+        }
+
+        public int TotalCompleted
+        {
+            get
+            {
+                int count = 0;
+                for (int i = 0; i < Data.categoryLevels.Count; i++)
+                    if (Data.categoryLevels[i].completed) count++;
+                return count;
+            }
+        }
+
+        public int CatLevelsCompleted
+        {
+            get
+            {
+                int count = 0;
+                for (int i = 0; i < Data.categoryLevels.Count; i++)
+                    if (Data.categoryLevels[i].completed && Data.categoryLevels[i].catLevel) count++;
+                return count;
+            }
+        }
+
+        public int PerfectCleanCount
+        {
+            get
+            {
+                int count = 0;
+                for (int i = 0; i < Data.categoryLevels.Count; i++)
+                    if (Data.categoryLevels[i].perfectClean) count++;
+                return count;
+            }
+        }
+
+        public bool IsCategoryComplete(LevelCategory category)
+        {
+            return CompletedCount(category) >= LevelCategoryCatalog.Count(category);
+        }
+
+        public bool IsCategoryUnlocked(LevelCategory category)
+        {
+            switch (category)
+            {
+                case LevelCategory.Easy:
+                case LevelCategory.Medium: return true;
+                case LevelCategory.Hard: return CompletedCount(LevelCategory.Medium) >= 10;
+                case LevelCategory.Expert: return CompletedCount(LevelCategory.Hard) >= 20;
+                case LevelCategory.CatChase: return CatLevelsCompleted >= 1;
+                default: return false;
+            }
+        }
+
+        public string CategoryLockReason(LevelCategory category)
+        {
+            switch (category)
+            {
+                case LevelCategory.Hard: return "Complete 10 Medium levels to unlock Hard.";
+                case LevelCategory.Expert: return "Complete 20 Hard levels to unlock Expert.";
+                case LevelCategory.CatChase: return "Complete your first cat level in Medium to unlock Cat Chase mode.";
+                default: return string.Empty;
+            }
+        }
+
+        public int NextUnfinishedLevel(LevelCategory category)
+        {
+            int count = LevelCategoryCatalog.Count(category);
+            for (int level = 1; level <= count; level++)
+            {
+                LevelProgressRecord record = FindRecord(category, level);
+                if (record == null || !record.completed) return level;
+            }
+            return count;
+        }
+
+        public bool IsLevelUnlocked(LevelCategory category, int levelNumber)
+        {
+            if (!IsCategoryUnlocked(category)) return false;
+            if (levelNumber <= 1) return true;
+            LevelProgressRecord previous = FindRecord(category, levelNumber - 1);
+            return previous != null && previous.completed;
         }
 
         public bool IsMainJourneyComplete()
         {
-            return GetStars(LevelManifest.MainJourneyLevelCount) > 0;
+            return IsCategoryComplete(LevelCategory.Expert);
         }
 
         public int ApplyResult(LevelResult result, DateTime today)
@@ -95,22 +210,27 @@ namespace DustBot
 
         private int ApplyMainResult(LevelResult result)
         {
-            result.levelNumber = Math.Max(1, Math.Min(LevelManifest.MainJourneyLevelCount, result.levelNumber));
+            if (result.category == LevelCategory.None) return ApplyRepeatableResult(result);
+            result.levelNumber = LevelCategoryCatalog.ClampLevel(result.category, result.levelNumber);
             result.stars = Math.Max(1, Math.Min(3, result.stars));
-            LevelProgressRecord record = FindMainRecord(result.levelNumber);
+            LevelProgressRecord record = FindRecord(result.category, result.levelNumber);
 
             if (record == null)
             {
-                record = new LevelProgressRecord { levelNumber = result.levelNumber };
-                Data.mainLevels.Add(record);
+                record = new LevelProgressRecord { category = result.category, levelNumber = result.levelNumber };
+                Data.categoryLevels.Add(record);
             }
 
             bool wasCompleted = record.completed;
             int previousStars = record.stars;
             bool hadBunny = record.dustBunnyCollected;
             record.completed = true;
+            record.catLevel |= result.catLevel;
             record.stars = Math.Max(record.stars, result.stars);
+            record.bestScore = Math.Max(record.bestScore, Math.Max(0, result.stars * 1000 - result.moves));
             record.dustBunnyCollected |= result.collectedBonus;
+            record.perfectClean |= result.stars >= 3 && !result.usedHint &&
+                                   (!result.bonusAvailable || result.collectedBonus);
             if (result.usedHint)
             {
                 record.hintsUsed++;
@@ -119,7 +239,9 @@ namespace DustBot
             Data.totalStars += record.stars - previousStars;
             Data.highestUnlockedMainLevel = Math.Max(
                 Data.highestUnlockedMainLevel,
-                Math.Min(LevelManifest.MainJourneyLevelCount, result.levelNumber + 1));
+                Math.Min(LevelCategoryCatalog.TotalLevelCount, TotalCompleted + 1));
+            Data.lastPlayedCategory = result.category;
+            Data.lastPlayedLevel = NextUnfinishedLevel(result.category);
 
             if (!wasCompleted)
             {
@@ -297,13 +419,14 @@ namespace DustBot
             return true;
         }
 
-        private LevelProgressRecord FindMainRecord(int levelNumber)
+        private LevelProgressRecord FindRecord(LevelCategory category, int levelNumber)
         {
-            for (int i = 0; i < Data.mainLevels.Count; i++)
+            for (int i = 0; i < Data.categoryLevels.Count; i++)
             {
-                if (Data.mainLevels[i].levelNumber == levelNumber)
+                if (Data.categoryLevels[i].category == category &&
+                    Data.categoryLevels[i].levelNumber == levelNumber)
                 {
-                    return Data.mainLevels[i];
+                    return Data.categoryLevels[i];
                 }
             }
 
@@ -340,6 +463,11 @@ namespace DustBot
             if (Data.mainLevels == null)
             {
                 Data.mainLevels = new List<LevelProgressRecord>();
+            }
+
+            if (Data.categoryLevels == null || Data.saveVersion < 5)
+            {
+                Data.categoryLevels = new List<LevelProgressRecord>();
             }
 
             if (Data.daily == null)
@@ -424,50 +552,53 @@ namespace DustBot
                 Data.rewardedCompletionLevelIds = new List<string>();
             }
 
-            SortedDictionary<int, LevelProgressRecord> records =
-                new SortedDictionary<int, LevelProgressRecord>();
-            for (int i = 0; i < Data.mainLevels.Count; i++)
+            SortedDictionary<string, LevelProgressRecord> records =
+                new SortedDictionary<string, LevelProgressRecord>();
+            for (int i = 0; i < Data.categoryLevels.Count; i++)
             {
-                LevelProgressRecord source = Data.mainLevels[i];
+                LevelProgressRecord source = Data.categoryLevels[i];
                 if (source == null ||
+                    source.category == LevelCategory.None ||
+                    !Enum.IsDefined(typeof(LevelCategory), source.category) ||
                     source.levelNumber < 1 ||
-                    source.levelNumber > LevelManifest.MainJourneyLevelCount)
+                    source.levelNumber > LevelCategoryCatalog.Count(source.category))
                 {
                     continue;
                 }
 
+                string key = ((int)source.category).ToString("D2", CultureInfo.InvariantCulture) +
+                             "_" + source.levelNumber.ToString("D3", CultureInfo.InvariantCulture);
                 LevelProgressRecord record;
-                if (!records.TryGetValue(source.levelNumber, out record))
+                if (!records.TryGetValue(key, out record))
                 {
-                    record = new LevelProgressRecord { levelNumber = source.levelNumber };
-                    records.Add(source.levelNumber, record);
+                    record = new LevelProgressRecord { category = source.category, levelNumber = source.levelNumber };
+                    records.Add(key, record);
                 }
 
                 record.completed |= source.completed;
                 record.stars = Math.Max(record.stars, Math.Max(0, Math.Min(3, source.stars)));
+                record.bestScore = Math.Max(record.bestScore, Math.Max(0, source.bestScore));
+                record.catLevel |= source.catLevel;
                 record.dustBunnyCollected |= source.dustBunnyCollected;
                 record.hintsUsed = Math.Max(record.hintsUsed, Math.Max(0, source.hintsUsed));
+                record.perfectClean |= source.perfectClean;
                 record.milestoneRewardClaimed |= source.milestoneRewardClaimed;
             }
 
-            Data.mainLevels = new List<LevelProgressRecord>(records.Values);
+            Data.categoryLevels = new List<LevelProgressRecord>(records.Values);
+            Data.mainLevels.Clear();
             Data.totalStars = 0;
-            int unlockedFromRecords = 1;
-            for (int i = 0; i < Data.mainLevels.Count; i++)
+            for (int i = 0; i < Data.categoryLevels.Count; i++)
             {
-                LevelProgressRecord record = Data.mainLevels[i];
+                LevelProgressRecord record = Data.categoryLevels[i];
                 Data.totalStars += record.stars;
-                if (record.completed)
-                {
-                    unlockedFromRecords = Math.Max(
-                        unlockedFromRecords,
-                        Math.Min(LevelManifest.MainJourneyLevelCount, record.levelNumber + 1));
-                }
             }
 
-            Data.highestUnlockedMainLevel = Math.Max(
-                unlockedFromRecords,
-                Math.Max(1, Math.Min(LevelManifest.MainJourneyLevelCount, Data.highestUnlockedMainLevel)));
+            Data.highestUnlockedMainLevel = Math.Min(LevelCategoryCatalog.TotalLevelCount, TotalCompleted + 1);
+            if (!Enum.IsDefined(typeof(LevelCategory), Data.lastPlayedCategory) ||
+                Data.lastPlayedCategory == LevelCategory.None || !IsCategoryUnlocked(Data.lastPlayedCategory))
+                Data.lastPlayedCategory = LevelCategory.Easy;
+            Data.lastPlayedLevel = LevelCategoryCatalog.ClampLevel(Data.lastPlayedCategory, Data.lastPlayedLevel);
             Data.masterCleanProgress = Math.Max(1, Data.masterCleanProgress);
             Data.endlessBestScore = Math.Max(0, Data.endlessBestScore);
             Data.endlessCurrentLevel = Math.Max(1, Data.endlessCurrentLevel);
@@ -491,7 +622,32 @@ namespace DustBot
                 Data.daily.totalCompleted = Math.Max(1, Data.daily.totalCompleted);
             }
             Data.daily.noHintCompletions = Math.Max(0, Data.daily.noHintCompletions);
-            Data.saveVersion = Math.Max(4, Data.saveVersion);
+            Data.saveVersion = 5;
+        }
+
+        public void ResetCategory(LevelCategory category)
+        {
+            for (int i = Data.categoryLevels.Count - 1; i >= 0; i--)
+                if (Data.categoryLevels[i].category == category) Data.categoryLevels.RemoveAt(i);
+            Sanitize();
+        }
+
+        public void CompleteCategoryForDebug(LevelCategory category)
+        {
+            int count = LevelCategoryCatalog.Count(category);
+            for (int level = 1; level <= count; level++)
+            {
+                LevelProgressRecord record = FindRecord(category, level);
+                if (record == null)
+                {
+                    record = new LevelProgressRecord { category = category, levelNumber = level };
+                    Data.categoryLevels.Add(record);
+                }
+                record.completed = true;
+                record.stars = Math.Max(1, record.stars);
+                record.catLevel |= LevelCategoryCatalog.IsCatLevel(category, level);
+            }
+            Sanitize();
         }
 
         private void EnsureDefaultOwned(string cosmeticId)

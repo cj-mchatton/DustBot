@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using UnityEngine;
 
 namespace DustBot
@@ -10,33 +9,55 @@ namespace DustBot
         private readonly DevelopmentLevelManifest developmentManifest =
             new DevelopmentLevelManifest();
         private readonly LevelGenerator generator = new LevelGenerator();
-        private readonly Dictionary<int, LevelDefinition> mainOverrides =
-            new Dictionary<int, LevelDefinition>();
-
         public LevelLoader()
         {
-            for (int levelNumber = 1; levelNumber <= LevelManifest.TutorialLevelCount; levelNumber++)
-            {
-                LevelDefinition tutorial = TutorialLevelCatalog.Get(levelNumber);
-                ValidateOrThrow(tutorial);
-                mainOverrides[levelNumber] = tutorial;
-            }
-
-            LevelDefinition catTutorial = CatTutorialLevelCatalog.GetIntroduction();
-            ValidateOrThrow(catTutorial);
-            mainOverrides[catTutorial.levelNumber] = catTutorial;
         }
 
+        // Compatibility entry point for validation/debug callers. Player-facing
+        // navigation always uses LoadCategory and never exposes this flat index.
         public LevelDefinition LoadMain(int levelNumber)
         {
             levelNumber = Math.Max(1, Math.Min(LevelManifest.MainJourneyLevelCount, levelNumber));
-            LevelDefinition overrideLevel;
-            if (mainOverrides.TryGetValue(levelNumber, out overrideLevel))
+            int remaining = levelNumber;
+            foreach (LevelCategory category in LevelCategoryCatalog.All)
             {
-                return overrideLevel;
+                int count = LevelCategoryCatalog.Count(category);
+                if (remaining <= count) return LoadCategory(category, remaining);
+                remaining -= count;
+            }
+            return LoadCategory(LevelCategory.Easy, 1);
+        }
+
+        public LevelDefinition LoadCategory(LevelCategory category, int levelNumber)
+        {
+            levelNumber = LevelCategoryCatalog.ClampLevel(category, levelNumber);
+            LevelDefinition level;
+            if (category == LevelCategory.Easy)
+            {
+                level = TutorialLevelCatalog.Get(levelNumber);
+                level.id = string.Format("Category_{0}_{1:000}", category, levelNumber);
+                level.category = category;
+                level.generationMode = GenerationMode.ProductionCampaign;
+                level.generationVersion = LevelManifest.CurrentGenerationVersion;
+                level.difficultyTier = LevelCategoryCatalog.Difficulty(category, levelNumber);
+            }
+            else if (category == LevelCategory.Medium && levelNumber == 1)
+            {
+                level = CatTutorialLevelCatalog.GetIntroduction();
+                level.id = "Category_Medium_001";
+                level.levelNumber = 1;
+                level.category = category;
+                level.generationMode = GenerationMode.ProductionCampaign;
+                level.tutorialMessage =
+                    "CAT CHASE • Swipe one tile. Then the cat moves twice, horizontal first. Use furniture, clean, and dock.";
+            }
+            else
+            {
+                level = generator.Generate(manifest.GetCategoryEntry(category, levelNumber), GameMode.MainJourney);
             }
 
-            return generator.Generate(manifest.GetMainEntry(levelNumber), GameMode.MainJourney);
+            ValidateOrThrow(level);
+            return level;
         }
 
         public GenerationMode ActiveGenerationMode
@@ -115,22 +136,6 @@ namespace DustBot
         public LevelDefinition LoadEndless(string runSeed, int levelNumber)
         {
             return generator.Generate(manifest.GetEndlessEntry(runSeed, levelNumber), GameMode.EndlessClean);
-        }
-
-        public void RegisterMainOverride(int levelNumber, LevelDefinition definition)
-        {
-            if (levelNumber < 1 || levelNumber > LevelManifest.MainJourneyLevelCount)
-            {
-                throw new ArgumentOutOfRangeException("levelNumber");
-            }
-
-            if (definition == null || definition.levelNumber != levelNumber)
-            {
-                throw new ArgumentException("Override metadata must match its manifest level number.", "definition");
-            }
-
-            ValidateOrThrow(definition);
-            mainOverrides[levelNumber] = definition;
         }
 
         private static LevelDefinition LoadTutorialTest(int levelNumber)

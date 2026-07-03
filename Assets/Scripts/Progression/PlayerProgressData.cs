@@ -6,11 +6,15 @@ namespace DustBot
     [Serializable]
     public class LevelProgressRecord
     {
+        public LevelCategory category;
         public int levelNumber;
         public int stars;
+        public int bestScore;
         public bool completed;
+        public bool catLevel;
         public bool dustBunnyCollected;
         public int hintsUsed;
+        public bool perfectClean;
         public bool milestoneRewardClaimed;
     }
 
@@ -64,7 +68,9 @@ namespace DustBot
     [Serializable]
     public class PlayerProgressData
     {
-        public int saveVersion = 4;
+        public int saveVersion = 5;
+        // Legacy fields remain readable so pre-release test saves deserialize
+        // safely. Category progression below is authoritative in save v5+.
         public int highestUnlockedMainLevel = 1;
         public int totalStars;
         public int dustCoins = 30;
@@ -75,6 +81,9 @@ namespace DustBot
         public int roomsCleaned;
         public int totalDustBunnies;
         public List<LevelProgressRecord> mainLevels = new List<LevelProgressRecord>();
+        public List<LevelProgressRecord> categoryLevels = new List<LevelProgressRecord>();
+        public LevelCategory lastPlayedCategory = LevelCategory.Easy;
+        public int lastPlayedLevel = 1;
         public List<string> collectedDustBunnyLevelIds = new List<string>();
         public List<string> rewardedCompletionLevelIds = new List<string>();
         public DailyChallengeData daily = new DailyChallengeData();

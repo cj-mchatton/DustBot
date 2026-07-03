@@ -12,6 +12,16 @@ namespace DustBot
         EndlessClean
     }
 
+    public enum LevelCategory
+    {
+        None,
+        Easy,
+        Medium,
+        Hard,
+        Expert,
+        CatChase
+    }
+
     public enum DifficultyTier
     {
         Tutorial,
@@ -359,6 +369,7 @@ namespace DustBot
         public string id;
         public GameMode mode;
         public GenerationMode generationMode;
+        public LevelCategory category;
         public int levelNumber;
         public string seed;
         public int generationVersion;
@@ -446,6 +457,7 @@ namespace DustBot
         public int levelNumber;
         public string seed;
         public GenerationMode generationMode;
+        public LevelCategory category;
         public int generationVersion;
         public DifficultyTier difficultyTier;
         public int boardWidth;
@@ -511,6 +523,8 @@ namespace DustBot
         public string levelId;
         public GameMode mode;
         public GenerationMode generationMode;
+        public LevelCategory category;
+        public bool catLevel;
         public bool dailyChallengeStyle;
         public bool masterCleanStyle;
         public int levelNumber;
@@ -520,6 +534,7 @@ namespace DustBot
         public bool usedHint;
         public bool usedUndo;
         public bool collectedBonus;
+        public bool bonusAvailable;
         public bool firstAttempt;
         public int baseCoins;
         public int starBonusCoins;

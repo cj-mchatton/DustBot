@@ -62,11 +62,7 @@ namespace DustBot
             Text greeting = UIFactory.CreateText(
                 "Greeting",
                 hero.transform,
-                journeyComplete
-                    ? "MASTER CLEAN AWAITS"
-                    : production
-                        ? "READY FOR THE NEXT ROOM?"
-                        : LevelGenerationConfig.DisplayName(generationMode),
+                production ? "READY FOR THE NEXT ROOM?" : LevelGenerationConfig.DisplayName(generationMode),
                 32,
                 DustBotTheme.Ink,
                 TextAnchor.MiddleLeft);
@@ -77,8 +73,9 @@ namespace DustBot
                 hero.transform,
                 production
                     ? string.Format(
-                        "LEVEL {0}\n{1} STARS  •  {2} BUNNIES\n{3} DAY DAILY STREAK",
-                        app.Progression.Data.highestUnlockedMainLevel,
+                        "{0} / {1} LEVELS COMPLETE\n{2} STARS  •  {3} BUNNIES\n{4} DAY DAILY STREAK",
+                        app.Progression.TotalCompleted,
+                        LevelCategoryCatalog.TotalLevelCount,
                         app.Progression.Data.totalStars,
                         app.Progression.Data.totalDustBunnies,
                         app.Progression.Data.daily.currentStreak)
@@ -95,19 +92,15 @@ namespace DustBot
             Button play = UIFactory.CreateButton(
                 "Primary Play",
                 root.transform,
-                journeyComplete
-                    ? "PLAY MASTER CLEAN"
-                    : "PLAY  •  LEVEL " +
-                      (production
-                          ? app.Progression.Data.highestUnlockedMainLevel
-                          : app.CurrentCampaignLevel),
+                production
+                    ? "CONTINUE  •  " + LevelCategoryCatalog.LevelName(
+                        app.Progression.Data.lastPlayedCategory,
+                        app.Progression.NextUnfinishedLevel(app.Progression.Data.lastPlayedCategory))
+                    : "PLAY  •  LEVEL " + app.CurrentCampaignLevel,
                 delegate
                 {
-                    if (journeyComplete) app.StartMaster();
-                    else app.StartMainLevel(
-                        production
-                            ? app.Progression.Data.highestUnlockedMainLevel
-                            : app.CurrentCampaignLevel);
+                    if (production) app.StartRecommendedLevel();
+                    else app.StartMainLevel(app.CurrentCampaignLevel);
                 },
                 DustBotTheme.Mint,
                 40);
@@ -205,6 +198,105 @@ namespace DustBot
             return root;
         }
 
+        public static GameObject BuildCategorySelect(DustBotApp app, RectTransform parent)
+        {
+            GameObject root = CreateRoot("Category Select", parent);
+            Button back = UIFactory.CreateButton("Back", root.transform, "HOME", app.UI.ShowMainMenu, DustBotTheme.MutedInk, 24);
+            UIFactory.SetAnchors(back.GetComponent<RectTransform>(), new Vector2(0.04f, 0.92f), new Vector2(0.23f, 0.975f), Vector2.zero, Vector2.zero);
+            Text title = UIFactory.CreateText("Title", root.transform, "CHOOSE A CHALLENGE", 49, DustBotTheme.Ink);
+            UIFactory.SetAnchors(title.rectTransform, new Vector2(0.23f, 0.91f), new Vector2(0.96f, 0.98f), Vector2.zero, Vector2.zero);
+
+            Color[] colors = { DustBotTheme.Mint, DustBotTheme.Blue, DustBotTheme.Yellow, DustBotTheme.Coral, DustBotTheme.MintDark };
+            Sprite[] icons = { DustBotSprites.Player, DustBotSprites.Crumbs, DustBotSprites.Cord, DustBotSprites.DustBunny, DustBotSprites.Cat };
+            for (int i = 0; i < LevelCategoryCatalog.All.Count; i++)
+            {
+                LevelCategory category = LevelCategoryCatalog.All[i];
+                LevelCategoryProfile profile = LevelCategoryCatalog.Get(category);
+                bool unlocked = app.Progression.IsCategoryUnlocked(category);
+                int completed = app.Progression.CompletedCount(category);
+                int stars = app.Progression.StarsInCategory(category);
+                float top = 0.88f - i * 0.15f;
+                string detail = unlocked
+                    ? string.Format("{0}  •  {1}/{2} complete  •  {3} stars", profile.description, completed, profile.levelCount, stars)
+                    : app.Progression.CategoryLockReason(category);
+                LevelCategory captured = category;
+                CreateMenuCard(
+                    root.transform,
+                    category + " Category",
+                    (unlocked ? string.Empty : "LOCKED  •  ") + profile.displayName,
+                    detail,
+                    delegate
+                    {
+                        if (app.Progression.IsCategoryUnlocked(captured)) app.UI.ShowCategoryLevelSelect(captured);
+                        else app.UI.ShowCategoryLockedMessage(captured);
+                    },
+                    unlocked ? colors[i] : new Color32(176, 187, 181, 255),
+                    i == 2 ? DustBotTheme.Ink : Color.white,
+                    icons[i],
+                    new Vector2(0.075f, top - 0.12f),
+                    new Vector2(0.925f, top));
+            }
+
+            Text footer = UIFactory.CreateText("Footer", root.transform, "260 intentional puzzles • five ways to clean", 22, DustBotTheme.MutedInk);
+            UIFactory.SetAnchors(footer.rectTransform, new Vector2(0.08f, 0.035f), new Vector2(0.92f, 0.09f), Vector2.zero, Vector2.zero);
+            return root;
+        }
+
+        public static GameObject BuildCategoryLevelSelect(
+            DustBotApp app, RectTransform parent, LevelCategory category, int requestedPage)
+        {
+            LevelCategoryProfile profile = LevelCategoryCatalog.Get(category);
+            int pageCount = (profile.levelCount + LevelsPerPage - 1) / LevelsPerPage;
+            int page = Mathf.Clamp(requestedPage, 0, pageCount - 1);
+            GameObject root = CreateRoot(category + " Level Select", parent);
+            Button back = UIFactory.CreateButton("Back", root.transform, "CATEGORIES", app.UI.ShowCategorySelect, DustBotTheme.MutedInk, 22);
+            UIFactory.SetAnchors(back.GetComponent<RectTransform>(), new Vector2(0.035f, 0.91f), new Vector2(0.27f, 0.975f), Vector2.zero, Vector2.zero);
+            Text title = UIFactory.CreateText("Title", root.transform, profile.displayName, 56, DustBotTheme.Ink);
+            UIFactory.SetAnchors(title.rectTransform, new Vector2(0.28f, 0.91f), new Vector2(0.96f, 0.98f), Vector2.zero, Vector2.zero);
+
+            GameObject gridObject = UIFactory.CreateUIObject("Level Grid", root.transform);
+            RectTransform gridRect = gridObject.GetComponent<RectTransform>();
+            UIFactory.SetAnchors(gridRect, new Vector2(0.055f, 0.16f), new Vector2(0.945f, 0.89f), Vector2.zero, Vector2.zero);
+            GridLayoutGroup grid = gridObject.AddComponent<GridLayoutGroup>();
+            grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
+            grid.constraintCount = 4;
+            grid.cellSize = new Vector2(205f, 135f);
+            grid.spacing = new Vector2(18f, 18f);
+            grid.childAlignment = TextAnchor.MiddleCenter;
+
+            int first = page * LevelsPerPage + 1;
+            int last = Mathf.Min(profile.levelCount, first + LevelsPerPage - 1);
+            for (int level = first; level <= last; level++)
+            {
+                int captured = level;
+                bool unlocked = app.Progression.IsLevelUnlocked(category, level);
+                int stars = app.Progression.GetStars(category, level);
+                bool bunny = app.Progression.HasDustBunny(category, level);
+                bool perfect = app.Progression.HasPerfectClean(category, level);
+                bool cat = LevelCategoryCatalog.IsCatLevel(category, level);
+                string state = cat ? "CAT" : category == LevelCategory.Easy ? "BASICS" : "MAZE";
+                string label = unlocked
+                    ? string.Format("{0}\n{1}  {2}{3}{4}", level, state, StarText(stars), bunny ? " ◆" : string.Empty, perfect ? " ✓" : string.Empty)
+                    : level + "\nLOCKED";
+                Button button = UIFactory.CreateButton(
+                    "Level " + level, grid.transform, label,
+                    delegate { app.StartCategoryLevel(category, captured); },
+                    unlocked ? DustBotTheme.Mint : new Color32(176, 187, 181, 255), 23);
+                button.interactable = unlocked;
+            }
+
+            Text pageText = UIFactory.CreateText("Page", root.transform,
+                string.Format("{0} {1}-{2} of {3}", profile.displayName, first, last, profile.levelCount), 24, DustBotTheme.MutedInk);
+            UIFactory.SetAnchors(pageText.rectTransform, new Vector2(0.27f, 0.07f), new Vector2(0.73f, 0.14f), Vector2.zero, Vector2.zero);
+            Button previous = UIFactory.CreateButton("Previous", root.transform, "PREV", delegate { app.UI.ShowCategoryLevelSelect(category, page - 1); }, DustBotTheme.Blue, 25);
+            UIFactory.SetAnchors(previous.GetComponent<RectTransform>(), new Vector2(0.055f, 0.055f), new Vector2(0.25f, 0.135f), Vector2.zero, Vector2.zero);
+            previous.interactable = page > 0;
+            Button next = UIFactory.CreateButton("Next", root.transform, "NEXT", delegate { app.UI.ShowCategoryLevelSelect(category, page + 1); }, DustBotTheme.Blue, 25);
+            UIFactory.SetAnchors(next.GetComponent<RectTransform>(), new Vector2(0.75f, 0.055f), new Vector2(0.945f, 0.135f), Vector2.zero, Vector2.zero);
+            next.interactable = page < pageCount - 1;
+            return root;
+        }
+
         public static GameObject BuildLevelSelect(DustBotApp app, RectTransform parent, int requestedPage)
         {
             int levelCount = app.Levels.CampaignLevelCount;
@@ -220,7 +312,7 @@ namespace DustBot
             Text title = UIFactory.CreateText(
                 "Title",
                 root.transform,
-                production ? "MAIN JOURNEY" : LevelGenerationConfig.DisplayName(generationMode),
+                production ? "CATEGORY LEVELS" : LevelGenerationConfig.DisplayName(generationMode),
                 production ? 54 : 42,
                 DustBotTheme.Ink);
             UIFactory.SetAnchors(title.rectTransform, new Vector2(0.25f, 0.91f), new Vector2(0.96f, 0.98f), Vector2.zero, Vector2.zero);
@@ -325,11 +417,37 @@ namespace DustBot
                     Vector2.zero);
             }
 
+            for (int i = 0; i < LevelCategoryCatalog.All.Count; i++)
+            {
+                LevelCategory capturedCategory = LevelCategoryCatalog.All[i];
+                float left = 0.035f + i * 0.19f;
+                Button categoryButton = UIFactory.CreateButton(
+                    "Category " + capturedCategory,
+                    root.transform,
+                    (capturedCategory == app.CurrentCategory ? "✓ " : string.Empty) + LevelCategoryCatalog.Name(capturedCategory),
+                    delegate
+                    {
+                        app.DebugSelectCategory(capturedCategory);
+                        app.UI.ShowDeveloperPanel();
+                    },
+                    capturedCategory == app.CurrentCategory ? DustBotTheme.MintDark : DustBotTheme.MutedInk,
+                    15);
+                UIFactory.SetAnchors(categoryButton.GetComponent<RectTransform>(),
+                    new Vector2(left, 0.67f), new Vector2(left + 0.175f, 0.72f), Vector2.zero, Vector2.zero);
+            }
+
             Image metadataPanel = UIFactory.CreatePanel("Metadata", root.transform, DustBotTheme.Panel);
-            UIFactory.SetAnchors(metadataPanel.rectTransform, new Vector2(0.05f, 0.43f), new Vector2(0.95f, 0.73f), Vector2.zero, Vector2.zero);
+            UIFactory.SetAnchors(metadataPanel.rectTransform, new Vector2(0.05f, 0.43f), new Vector2(0.95f, 0.655f), Vector2.zero, Vector2.zero);
+            LevelCategoryProfile currentProfile = LevelCategoryCatalog.Get(app.CurrentCategory);
+            string profileSummary = string.Format(
+                "PROFILE: {0} • {1} LEVELS • {2} CAT • {3} MAZE",
+                currentProfile.displayName,
+                currentProfile.levelCount,
+                currentProfile.catLevelCount,
+                currentProfile.mazeLevelCount);
             string metadata = app.CurrentLevel == null
-                ? "No campaign level loaded. Choose a mode, then jump to a level."
-                : LevelMetadata.Format(app.CurrentLevel);
+                ? profileSummary + "\nNo level loaded. Choose a category and jump to a level."
+                : profileSummary + "\n" + LevelMetadata.Format(app.CurrentLevel);
             Text metadataText = UIFactory.CreateText(
                 "Metadata Text",
                 metadataPanel.transform,
@@ -377,13 +495,26 @@ namespace DustBot
                 app.UI.ShowDeveloperPanel();
             }, DustBotTheme.Yellow, 21);
             UIFactory.GetButtonText(coins).color = DustBotTheme.Ink;
-            UIFactory.SetAnchors(coins.GetComponent<RectTransform>(), new Vector2(0.05f, 0.17f), new Vector2(0.47f, 0.24f), Vector2.zero, Vector2.zero);
+            UIFactory.SetAnchors(coins.GetComponent<RectTransform>(), new Vector2(0.05f, 0.17f), new Vector2(0.265f, 0.24f), Vector2.zero, Vector2.zero);
+            Button completeCategory = UIFactory.CreateButton("Complete Category", root.transform, "COMPLETE", delegate
+            {
+                app.DebugCompleteCategory(app.CurrentCategory);
+                app.UI.ShowDeveloperPanel();
+            }, DustBotTheme.Mint, 16);
+            UIFactory.SetAnchors(completeCategory.GetComponent<RectTransform>(), new Vector2(0.275f, 0.17f), new Vector2(0.49f, 0.24f), Vector2.zero, Vector2.zero);
+            Button resetCategory = UIFactory.CreateButton("Reset Category", root.transform, "RESET CATEGORY", delegate
+            {
+                app.DebugResetCategory(app.CurrentCategory);
+                app.UI.ShowDeveloperPanel();
+            }, DustBotTheme.MutedInk, 15);
+            UIFactory.SetAnchors(resetCategory.GetComponent<RectTransform>(), new Vector2(0.50f, 0.17f), new Vector2(0.715f, 0.24f), Vector2.zero, Vector2.zero);
             Button unlock = UIFactory.CreateButton("Unlock Campaign", root.transform, "UNLOCK LEVELS + MASTER", delegate
             {
                 app.DebugUnlockCampaignAndMaster();
                 app.UI.ShowDeveloperPanel();
             }, DustBotTheme.MintDark, 19);
-            UIFactory.SetAnchors(unlock.GetComponent<RectTransform>(), new Vector2(0.53f, 0.17f), new Vector2(0.95f, 0.24f), Vector2.zero, Vector2.zero);
+            UIFactory.GetButtonText(unlock).text = "UNLOCK ALL";
+            UIFactory.SetAnchors(unlock.GetComponent<RectTransform>(), new Vector2(0.725f, 0.17f), new Vector2(0.95f, 0.24f), Vector2.zero, Vector2.zero);
 
             Button cosmetics = UIFactory.CreateButton("Unlock Cosmetics", root.transform, "UNLOCK COSMETICS", delegate
             {
@@ -409,7 +540,7 @@ namespace DustBot
             Text footer = UIFactory.CreateText(
                 "Footer",
                 root.transform,
-                "Mode selection is runtime-only. Release builds force Production Campaign.",
+                "Developer playlists are runtime-only. Release builds use the 260 production category levels.",
                 18,
                 DustBotTheme.MutedInk);
             UIFactory.SetAnchors(footer.rectTransform, new Vector2(0.05f, 0.02f), new Vector2(0.95f, 0.065f), Vector2.zero, Vector2.zero);
@@ -1331,7 +1462,7 @@ namespace DustBot
                 case GenerationMode.ObstacleTesting: return "OBSTACLES 18";
                 case GenerationMode.TutorialTesting: return "TUTORIALS 8";
                 case GenerationMode.MazeTesting: return "MAZES 20";
-                default: return "PRODUCTION 6000";
+                default: return "PRODUCTION 260";
             }
         }
 

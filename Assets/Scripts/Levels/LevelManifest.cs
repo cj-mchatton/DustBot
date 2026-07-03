@@ -5,118 +5,74 @@ namespace DustBot
 {
     public sealed class LevelManifest
     {
-        public const int MainJourneyLevelCount = 6000;
+        // Kept as a compatibility alias for developer tooling. Production play
+        // is category-based and contains 260 total levels.
+        public const int MainJourneyLevelCount = LevelCategoryCatalog.TotalLevelCount;
         public const int TutorialLevelCount = 3;
         public const int CurrentGenerationVersion = 8;
 
         public LevelManifestEntry GetMainEntry(int levelNumber)
         {
             levelNumber = Math.Max(1, Math.Min(MainJourneyLevelCount, levelNumber));
-            DifficultyTier tier;
+            int remaining = levelNumber;
+            foreach (LevelCategory category in LevelCategoryCatalog.All)
+            {
+                int count = LevelCategoryCatalog.Count(category);
+                if (remaining <= count) return GetCategoryEntry(category, remaining);
+                remaining -= count;
+            }
+            return GetCategoryEntry(LevelCategory.Easy, 1);
+        }
+
+        public LevelManifestEntry GetCategoryEntry(LevelCategory category, int levelNumber)
+        {
+            levelNumber = LevelCategoryCatalog.ClampLevel(category, levelNumber);
+            DifficultyTier tier = LevelCategoryCatalog.Difficulty(category, levelNumber);
+            bool cat = LevelCategoryCatalog.IsCatLevel(category, levelNumber);
+            bool maze = category != LevelCategory.Easy && !cat;
             int width;
             int height;
-
-            LevelArchetype archetype = SelectMainArchetype(levelNumber);
-            bool largeMaze = false;
-            if (levelNumber <= TutorialLevelCount)
+            switch (category)
             {
-                tier = DifficultyTier.Tutorial;
-                width = levelNumber == TutorialLevelCount ? 5 : 4;
-                height = width;
-            }
-            else if (levelNumber <= 20)
-            {
-                tier = DifficultyTier.Beginner;
-                width = levelNumber % 4 == 0 ? 7 : 6;
-                height = levelNumber % 5 == 0 ? 7 : 6;
-            }
-            else if (levelNumber <= 35)
-            {
-                tier = DifficultyTier.Easy;
-                width = levelNumber % 3 == 0 ? 7 : 6;
-                height = levelNumber % 4 == 0 ? 7 : 6;
-            }
-            else if (levelNumber <= 60)
-            {
-                tier = DifficultyTier.Medium;
-                width = levelNumber % 3 == 0 ? 9 : 8;
-                height = levelNumber % 4 == 0 ? 9 : 8;
-                largeMaze = archetype == LevelArchetype.BlockerMaze ||
-                            archetype == LevelArchetype.TrickRoute;
-            }
-            else if (levelNumber <= 100)
-            {
-                tier = DifficultyTier.Medium;
-                width = levelNumber % 3 == 0 ? 10 : 9;
-                height = levelNumber % 4 == 0 ? 10 : 9;
-                largeMaze = archetype == LevelArchetype.BlockerMaze ||
-                            archetype == LevelArchetype.TrickRoute ||
-                            archetype == LevelArchetype.ChallengeRoute;
-            }
-            else if (levelNumber <= 250)
-            {
-                tier = DifficultyTier.Hard;
-                width = levelNumber % 3 == 0 ? 13 : 12;
-                height = levelNumber % 4 == 0 ? 13 : 12;
-                largeMaze = IsLargeMazeArchetype(archetype);
-            }
-            else if (levelNumber <= 500)
-            {
-                tier = DifficultyTier.Hard;
-                width = levelNumber % 3 == 0 ? 14 : 13;
-                height = levelNumber % 4 == 0 ? 14 : 13;
-                largeMaze = IsLargeMazeArchetype(archetype);
-            }
-            else if (levelNumber <= 1000)
-            {
-                tier = DifficultyTier.Hard;
-                width = levelNumber % 3 == 0 ? 15 : 14;
-                height = levelNumber % 5 == 0 ? 15 : 14;
-                largeMaze = IsLargeMazeArchetype(archetype);
-            }
-            else if (levelNumber <= 4000)
-            {
-                tier = DifficultyTier.Expert;
-                width = 15 + levelNumber % 4;
-                height = 15 + (levelNumber / 3) % 4;
-                largeMaze = IsLargeMazeArchetype(archetype);
-            }
-            else
-            {
-                tier = DifficultyTier.Master;
-                width = 18 + levelNumber % 4;
-                height = 18 + (levelNumber / 3) % 4;
-                largeMaze = true;
+                case LevelCategory.Easy:
+                    width = levelNumber <= 3 ? 4 : 5;
+                    height = width;
+                    break;
+                case LevelCategory.Medium:
+                    width = cat ? 7 + levelNumber % 2 : 9 + levelNumber % 3;
+                    height = cat ? 7 + (levelNumber / 2) % 2 : 9 + (levelNumber / 3) % 3;
+                    break;
+                case LevelCategory.Hard:
+                    width = cat ? 9 : 12 + levelNumber % 4;
+                    height = cat ? 9 : 12 + (levelNumber / 3) % 4;
+                    break;
+                case LevelCategory.Expert:
+                    width = cat ? 10 + levelNumber % 3 : 16 + levelNumber % 5;
+                    height = cat ? 10 + (levelNumber / 3) % 3 : 16 + (levelNumber / 4) % 5;
+                    break;
+                default:
+                    width = tier <= DifficultyTier.Medium ? 7 + levelNumber % 2 : 9 + levelNumber % 3;
+                    height = tier <= DifficultyTier.Medium ? 7 + (levelNumber / 2) % 2 : 9 + (levelNumber / 3) % 3;
+                    break;
             }
 
-            if (tier >= DifficultyTier.Hard && !largeMaze)
-            {
-                width = tier >= DifficultyTier.Expert ? 10 : 9;
-                height = tier >= DifficultyTier.Expert ? 10 : 9;
-            }
-
+            uint hash = DeterministicRandom.StableHash(category + "_Archetype_" + levelNumber);
             LevelManifestEntry entry = CreateEntry(
                 levelNumber,
-                string.Format(CultureInfo.InvariantCulture, "DustBot_Main_{0:0000}", levelNumber),
+                string.Format(CultureInfo.InvariantCulture, "DustBot_{0}_{1:000}_v{2}", category, levelNumber, CurrentGenerationVersion),
                 tier,
                 width,
                 height,
-                archetype,
+                category == LevelCategory.Easy ? SelectMainArchetype(levelNumber) : SelectChallengeArchetype(hash),
                 false);
-            entry.useLargeMaze = largeMaze;
-            if (levelNumber > 21 && !largeMaze)
-            {
-                bool useCat = ShouldUseCampaignCat(levelNumber);
-                entry.hasCatBehaviorOverride = true;
-                entry.catBehaviorOverride = useCat
-                    ? CatBehavior.Curious
-                    : CatBehavior.None;
-                entry.useProceduralCatLayout = useCat;
-                entry.catPuzzleArchetype = useCat
-                    ? SelectCatPuzzleArchetype(levelNumber)
-                    : CatPuzzleArchetype.None;
-                entry.catStartZone = useCat ? SelectCatStartZone(levelNumber) : -1;
-            }
+            entry.category = category;
+            entry.useLargeMaze = maze;
+            entry.hasCatBehaviorOverride = true;
+            entry.catBehaviorOverride = cat ? CatBehavior.Curious : CatBehavior.None;
+            entry.useProceduralCatLayout = cat;
+            entry.catPuzzleArchetype = cat ? SelectCatPuzzleArchetype(levelNumber + (int)category * 101) : CatPuzzleArchetype.None;
+            entry.catStartZone = cat ? SelectCatStartZone(levelNumber + (int)category * 101) : -1;
+            entry.mechanicSet = cat ? "CatChaseTurns" : "DrawPath";
             return entry;
         }
 

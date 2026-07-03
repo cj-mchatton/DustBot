@@ -32,6 +32,11 @@ namespace DustBot
         public void ShowLevelSelect(int page = -1)
         {
             if (app.Audio != null) app.Audio.PlayMenuMusic();
+            if (app.Levels.ActiveGenerationMode == GenerationMode.ProductionCampaign)
+            {
+                ShowCategorySelect();
+                return;
+            }
             if (page < 0)
             {
                 int level = app.Levels.ActiveGenerationMode == GenerationMode.ProductionCampaign
@@ -41,6 +46,32 @@ namespace DustBot
             }
 
             SwitchTo(MenuScreens.BuildLevelSelect(app, safeArea, page));
+        }
+
+        public void ShowCategorySelect()
+        {
+            if (app.Audio != null) app.Audio.PlayMenuMusic();
+            SwitchTo(MenuScreens.BuildCategorySelect(app, safeArea));
+        }
+
+        public void ShowCategoryLevelSelect(LevelCategory category, int page = -1)
+        {
+            if (!app.Progression.IsCategoryUnlocked(category))
+            {
+                ShowCategoryLockedMessage(category);
+                return;
+            }
+            if (app.Audio != null) app.Audio.PlayMenuMusic();
+            if (page < 0)
+                page = (app.Progression.NextUnfinishedLevel(category) - 1) / MenuScreens.LevelsPerPage;
+            SwitchTo(MenuScreens.BuildCategoryLevelSelect(app, safeArea, category, page));
+        }
+
+        public void ShowCategoryLockedMessage(LevelCategory category)
+        {
+            ShowInfoModal(
+                LevelCategoryCatalog.Name(category) + " LOCKED",
+                app.Progression.CategoryLockReason(category));
         }
 
         public void ShowSettings()
@@ -96,7 +127,7 @@ namespace DustBot
         {
             ShowInfoModal(
                 "MASTER CLEAN LOCKED",
-                "Complete Level " + LevelManifest.MainJourneyLevelCount + " to unlock Master Clean.\n\nKeep cleaning!");
+                "Complete all 100 Expert levels to unlock Master Clean.\n\nKeep cleaning!");
         }
 
         private void BuildCanvas()

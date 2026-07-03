@@ -18,10 +18,14 @@ namespace DustBot
             StringBuilder builder = new StringBuilder(480);
             builder.Append("Generation mode: ").Append(level.generationMode).Append('\n')
                 .Append("Level number: ").Append(level.levelNumber).Append('\n');
+            if (level.category != LevelCategory.None)
+                builder.Append("Category: ").Append(LevelCategoryCatalog.Name(level.category)).Append('\n');
             if (level.mode == GameMode.MainJourney)
             {
                 builder.Append("Playlist size: ")
-                    .Append(LevelGenerationConfig.LevelCount(level.generationMode)).Append('\n');
+                    .Append(level.category == LevelCategory.None
+                        ? LevelGenerationConfig.LevelCount(level.generationMode)
+                        : LevelCategoryCatalog.Count(level.category)).Append('\n');
             }
             builder
                 .Append("Seed: ").Append(level.seed).Append('\n')

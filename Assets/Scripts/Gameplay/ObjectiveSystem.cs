@@ -48,6 +48,8 @@ namespace DustBot
                 levelId = session.Level.id,
                 mode = session.Level.mode,
                 generationMode = session.Level.generationMode,
+                category = session.Level.category,
+                catLevel = session.HasCat,
                 dailyChallengeStyle = session.Level.dailyChallengeStyle,
                 masterCleanStyle = session.Level.masterCleanStyle,
                 levelNumber = session.Level.levelNumber,
@@ -57,6 +59,7 @@ namespace DustBot
                 usedHint = session.UsedHint,
                 usedUndo = session.UsedUndo,
                 collectedBonus = session.CollectedBonus,
+                bonusAvailable = session.Level.objectives.collectBonus,
                 firstAttempt = session.SimulationAttempts <= 1
             };
         }
