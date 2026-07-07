@@ -117,7 +117,7 @@ namespace DustBot
             {
                 case LevelCategory.Hard: return "Complete 10 Medium levels to unlock Hard.";
                 case LevelCategory.Expert: return "Complete 20 Hard levels to unlock Expert.";
-                case LevelCategory.CatChase: return "Complete your first cat level in Medium to unlock Cat Chase mode.";
+                case LevelCategory.CatChase: return "Complete the cat lesson in Easy 4 to unlock Cat Chase mode.";
                 default: return string.Empty;
             }
         }
@@ -505,17 +505,27 @@ namespace DustBot
 
             EnsureDefaultOwned(CosmeticCatalog.DefaultTileTheme);
             EnsureDefaultOwned(CosmeticCatalog.DefaultDock);
+            EnsureDefaultOwned(CosmeticCatalog.DefaultCrumbStyle);
+            EnsureDefaultOwned(CosmeticCatalog.DefaultCatSkin);
             EnsureDefaultOwned(CosmeticCatalog.DefaultWinAnimation);
             EnsureDefaultOwned(CosmeticCatalog.DefaultRoomBackground);
 
             Data.cosmetics.activeBotSkinId = SanitizeActive(
                 Data.cosmetics.activeBotSkinId,
-                CosmeticCategory.BotSkin,
+                CosmeticCategory.DustBotSkin,
                 CosmeticCatalog.DefaultBot);
             Data.cosmetics.activePathColorId = SanitizeActive(
                 Data.cosmetics.activePathColorId,
-                CosmeticCategory.PathColor,
+                CosmeticCategory.PathTrail,
                 CosmeticCatalog.DefaultPath);
+            Data.cosmetics.activeCrumbStyleId = SanitizeActive(
+                Data.cosmetics.activeCrumbStyleId,
+                CosmeticCategory.CrumbStyle,
+                CosmeticCatalog.DefaultCrumbStyle);
+            Data.cosmetics.activeCatSkinId = SanitizeActive(
+                Data.cosmetics.activeCatSkinId,
+                CosmeticCategory.CatSkin,
+                CosmeticCatalog.DefaultCatSkin);
             Data.cosmetics.activeTileThemeId = SanitizeActive(
                 Data.cosmetics.activeTileThemeId,
                 CosmeticCategory.TileTheme,
@@ -531,7 +541,7 @@ namespace DustBot
             Data.cosmetics.activeFailureAnimationId = CosmeticCatalog.DefaultFailureAnimation;
             Data.cosmetics.activeRoomBackgroundId = SanitizeActive(
                 Data.cosmetics.activeRoomBackgroundId,
-                CosmeticCategory.RoomBackground,
+                CosmeticCategory.RoomTheme,
                 CosmeticCatalog.DefaultRoomBackground);
 
             if (Data.cosmetics.purchaseHistory == null)

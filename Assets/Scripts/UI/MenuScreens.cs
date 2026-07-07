@@ -237,7 +237,7 @@ namespace DustBot
                     new Vector2(0.925f, top));
             }
 
-            Text footer = UIFactory.CreateText("Footer", root.transform, "260 intentional puzzles • five ways to clean", 22, DustBotTheme.MutedInk);
+            Text footer = UIFactory.CreateText("Footer", root.transform, "255 curated puzzles • five ways to clean", 22, DustBotTheme.MutedInk);
             UIFactory.SetAnchors(footer.rectTransform, new Vector2(0.08f, 0.035f), new Vector2(0.92f, 0.09f), Vector2.zero, Vector2.zero);
             return root;
         }
@@ -274,7 +274,9 @@ namespace DustBot
                 bool bunny = app.Progression.HasDustBunny(category, level);
                 bool perfect = app.Progression.HasPerfectClean(category, level);
                 bool cat = LevelCategoryCatalog.IsCatLevel(category, level);
-                string state = cat ? "CAT" : category == LevelCategory.Easy ? "BASICS" : "MAZE";
+                string state = cat ? "CAT" : category == LevelCategory.Easy
+                    ? level == 5 ? "MAZE" : "LESSON"
+                    : "MAZE";
                 string label = unlocked
                     ? string.Format("{0}\n{1}  {2}{3}{4}", level, state, StarText(stars), bunny ? " ◆" : string.Empty, perfect ? " ✓" : string.Empty)
                     : level + "\nLOCKED";
@@ -540,7 +542,7 @@ namespace DustBot
             Text footer = UIFactory.CreateText(
                 "Footer",
                 root.transform,
-                "Developer playlists are runtime-only. Release builds use the 260 production category levels.",
+                "Developer playlists are runtime-only. Release builds use the 255 fixed curated category levels.",
                 18,
                 DustBotTheme.MutedInk);
             UIFactory.SetAnchors(footer.rectTransform, new Vector2(0.05f, 0.02f), new Vector2(0.95f, 0.065f), Vector2.zero, Vector2.zero);
@@ -658,18 +660,23 @@ namespace DustBot
             CosmeticCategory category,
             int requestedPage)
         {
-            GameObject root = CreateRoot("Cosmetic Store", parent);
+            return BuildCosmeticCategorySelect(app, parent);
+        }
 
-            Button back = UIFactory.CreateButton(
-                "Back",
+        public static GameObject BuildCosmeticCategorySelect(DustBotApp app, RectTransform parent)
+        {
+            GameObject root = CreateRoot("Cosmetic Categories", parent);
+
+            Button home = UIFactory.CreateButton(
+                "Home",
                 root.transform,
                 "HOME",
                 app.UI.ShowMainMenu,
                 DustBotTheme.MutedInk,
                 22);
-            UIFactory.SetAnchors(back.GetComponent<RectTransform>(), new Vector2(0.035f, 0.92f), new Vector2(0.19f, 0.975f), Vector2.zero, Vector2.zero);
+            UIFactory.SetAnchors(home.GetComponent<RectTransform>(), new Vector2(0.035f, 0.92f), new Vector2(0.19f, 0.975f), Vector2.zero, Vector2.zero);
 
-            Text title = UIFactory.CreateText("Title", root.transform, "COSMETIC STORE", 56, DustBotTheme.Ink);
+            Text title = UIFactory.CreateText("Title", root.transform, "COSMETICS", 56, DustBotTheme.Ink);
             UIFactory.SetAnchors(title.rectTransform, new Vector2(0.2f, 0.915f), new Vector2(0.8f, 0.98f), Vector2.zero, Vector2.zero);
 
             Text wallet = UIFactory.CreateText(
@@ -687,27 +694,131 @@ namespace DustBot
             Text hint = UIFactory.CreateText(
                 "Scroll Hint",
                 root.transform,
-                "Swipe vertically to browse cards. Cosmetics never affect gameplay.",
+                "Choose what you want to customize. Every change is visual only.",
                 21,
                 DustBotTheme.MutedInk);
             UIFactory.SetAnchors(hint.rectTransform, new Vector2(0.07f, 0.815f), new Vector2(0.93f, 0.865f), Vector2.zero, Vector2.zero);
 
             ScrollRect scroll = CreateStoreScroll(root.transform);
             RectTransform content = scroll.content;
-            List<CosmeticCategory> categories = VisibleStoreCategories(category);
-            for (int i = 0; i < categories.Count; i++)
+            CosmeticCategory[] categories = StoreCategories();
+            for (int i = 0; i < categories.Length; i++)
             {
-                AddStoreSection(app, content, categories[i]);
+                CreateCategoryCard(app, content, categories[i]);
             }
+
+            return root;
+        }
+
+        public static GameObject BuildCosmeticCategory(
+            DustBotApp app,
+            RectTransform parent,
+            CosmeticCategory category)
+        {
+            GameObject root = CreateRoot("Cosmetic Store " + category, parent);
+
+            Button categories = UIFactory.CreateButton(
+                "Categories",
+                root.transform,
+                "CATEGORIES",
+                app.UI.ShowCosmetics,
+                DustBotTheme.MutedInk,
+                20);
+            UIFactory.SetAnchors(categories.GetComponent<RectTransform>(), new Vector2(0.035f, 0.92f), new Vector2(0.225f, 0.975f), Vector2.zero, Vector2.zero);
+
+            Text title = UIFactory.CreateText("Title", root.transform, CategorySectionTitle(category).ToUpperInvariant(), 45, DustBotTheme.Ink);
+            UIFactory.SetAnchors(title.rectTransform, new Vector2(0.22f, 0.915f), new Vector2(0.97f, 0.98f), Vector2.zero, Vector2.zero);
+            title.resizeTextForBestFit = true;
+            title.resizeTextMinSize = 28;
+            title.resizeTextMaxSize = 45;
+
+            Text wallet = UIFactory.CreateText(
+                "Wallet",
+                root.transform,
+                string.Format("{0} COINS  •  {1} BUNNIES  •  {2} STARS", app.Economy.Coins, app.Progression.Data.totalDustBunnies, app.Progression.Data.totalStars),
+                23,
+                DustBotTheme.MintDark);
+            UIFactory.SetAnchors(wallet.rectTransform, new Vector2(0.08f, 0.86f), new Vector2(0.96f, 0.92f), Vector2.zero, Vector2.zero);
+
+            Text hint = UIFactory.CreateText("Category Description", root.transform, CategoryDescription(category), 21, DustBotTheme.MutedInk);
+            UIFactory.SetAnchors(hint.rectTransform, new Vector2(0.07f, 0.815f), new Vector2(0.93f, 0.865f), Vector2.zero, Vector2.zero);
+
+            ScrollRect scroll = CreateStoreScroll(root.transform);
+            AddStoreSection(app, scroll.content, category);
 
             Text footer = UIFactory.CreateText(
                 "Store Footer",
-                content,
-                "No fail cosmetics are sold here — DustBot prefers optimism.",
+                scroll.content,
+                "Tap any card for a larger preview, requirements, and actions.",
                 22,
                 DustBotTheme.MutedInk);
             LayoutElement footerLayout = footer.gameObject.AddComponent<LayoutElement>();
             footerLayout.minHeight = 70f;
+            return root;
+        }
+
+        public static GameObject BuildCosmeticDetail(
+            DustBotApp app,
+            RectTransform parent,
+            CosmeticCategory category,
+            string cosmeticId)
+        {
+            CosmeticDefinition definition = CosmeticCatalog.Find(cosmeticId);
+            if (definition == null) return BuildCosmeticCategory(app, parent, category);
+
+            GameObject root = CreateRoot("Cosmetic Detail " + cosmeticId, parent);
+            Button back = UIFactory.CreateButton("Back", root.transform, "BACK", delegate { app.UI.ShowCosmeticCategory(category); }, DustBotTheme.MutedInk, 22);
+            UIFactory.SetAnchors(back.GetComponent<RectTransform>(), new Vector2(0.04f, 0.92f), new Vector2(0.20f, 0.975f), Vector2.zero, Vector2.zero);
+
+            Text heading = UIFactory.CreateText("Heading", root.transform, "COSMETIC PREVIEW", 49, DustBotTheme.Ink);
+            UIFactory.SetAnchors(heading.rectTransform, new Vector2(0.21f, 0.915f), new Vector2(0.94f, 0.98f), Vector2.zero, Vector2.zero);
+
+            Image panel = UIFactory.CreatePanel("Detail Panel", root.transform, new Color(1f, 0.995f, 0.965f, 0.98f));
+            UIFactory.SetAnchors(panel.rectTransform, new Vector2(0.06f, 0.08f), new Vector2(0.94f, 0.89f), Vector2.zero, Vector2.zero);
+            Shadow shadow = panel.gameObject.AddComponent<Shadow>();
+            shadow.effectColor = new Color(0.08f, 0.12f, 0.1f, 0.18f);
+            shadow.effectDistance = new Vector2(0f, -7f);
+
+            Image preview = UIFactory.CreatePanel("Large Preview", panel.transform, PreviewBackground(definition));
+            UIFactory.SetAnchors(preview.rectTransform, new Vector2(0.08f, 0.52f), new Vector2(0.92f, 0.94f), Vector2.zero, Vector2.zero);
+            preview.raycastTarget = false;
+            AddCosmeticPreview(preview.transform, definition);
+
+            Text name = UIFactory.CreateText("Name", panel.transform, definition.displayName, 42, DustBotTheme.Ink);
+            name.fontStyle = FontStyle.Bold;
+            UIFactory.SetAnchors(name.rectTransform, new Vector2(0.07f, 0.445f), new Vector2(0.93f, 0.525f), Vector2.zero, Vector2.zero);
+
+            Text metadata = UIFactory.CreateText("Metadata", panel.transform, CategorySectionTitle(definition.category) + "  •  " + definition.rarity.ToString().ToUpperInvariant(), 23, RarityTextColor(definition.rarity));
+            Image badge = UIFactory.CreatePanel("Metadata Badge", panel.transform, RarityColor(definition.rarity));
+            UIFactory.SetAnchors(badge.rectTransform, new Vector2(0.20f, 0.395f), new Vector2(0.80f, 0.445f), Vector2.zero, Vector2.zero);
+            metadata.transform.SetParent(badge.transform, false);
+            UIFactory.Stretch(metadata.gameObject);
+
+            Text description = UIFactory.CreateText("Description", panel.transform, definition.description, 24, DustBotTheme.MutedInk);
+            UIFactory.SetAnchors(description.rectTransform, new Vector2(0.08f, 0.30f), new Vector2(0.92f, 0.39f), Vector2.zero, Vector2.zero);
+
+            bool owned = app.Cosmetics.Owns(definition.id);
+            string lockReason = app.Cosmetics.LockReason(definition);
+            Text requirement = UIFactory.CreateText(
+                "Requirement",
+                panel.transform,
+                owned ? "OWNED  •  " + (app.Cosmetics.Status(definition) == "SELECTED" ? "EQUIPPED" : "READY TO EQUIP") : RequirementSummary(definition, lockReason) + "\n" + CostText(definition, false),
+                24,
+                string.IsNullOrEmpty(lockReason) ? DustBotTheme.MintDark : DustBotTheme.Warning);
+            UIFactory.SetAnchors(requirement.rectTransform, new Vector2(0.08f, 0.18f), new Vector2(0.92f, 0.29f), Vector2.zero, Vector2.zero);
+
+            bool canAct = owned || (string.IsNullOrEmpty(lockReason) && app.Economy.Coins >= definition.coinPrice);
+            string actionLabel = StateText(definition, owned, string.IsNullOrEmpty(lockReason), app.Economy.Coins >= definition.coinPrice, app.Cosmetics.Status(definition));
+            Button action = UIFactory.CreateButton("Cosmetic Action", panel.transform, actionLabel, delegate
+            {
+                bool wasOwned = app.Cosmetics.Owns(definition.id);
+                if (!app.Cosmetics.TryUnlockOrSelect(definition.id)) return;
+                if (wasOwned) app.Audio.PlayStoreItemSelected(); else app.Audio.PlayPurchaseSuccess();
+                app.SaveNow();
+                app.UI.ShowCosmeticDetail(category, definition.id);
+            }, canAct ? DustBotTheme.MintDark : DustBotTheme.MutedInk, 30);
+            action.interactable = canAct && app.Cosmetics.Status(definition) != "SELECTED";
+            UIFactory.SetAnchors(action.GetComponent<RectTransform>(), new Vector2(0.17f, 0.055f), new Vector2(0.83f, 0.15f), Vector2.zero, Vector2.zero);
             return root;
         }
 
@@ -842,8 +953,8 @@ namespace DustBot
             Image viewport = UIFactory.CreatePanel("Viewport", scrollObject.transform, new Color(1f, 1f, 1f, 0.02f));
             UIFactory.Stretch(viewport.gameObject);
             viewport.raycastTarget = true;
-            Mask mask = viewport.gameObject.AddComponent<Mask>();
-            mask.showMaskGraphic = false;
+            viewport.gameObject.AddComponent<RectMask2D>();
+            viewport.color = Color.clear;
             scroll.viewport = viewport.rectTransform;
 
             GameObject contentObject = UIFactory.CreateUIObject("Store Content", viewport.transform);
@@ -867,6 +978,77 @@ namespace DustBot
             fitter.verticalFit = ContentSizeFitter.FitMode.PreferredSize;
             scroll.content = content;
             return scroll;
+        }
+
+        private static CosmeticCategory[] StoreCategories()
+        {
+            return new[]
+            {
+                CosmeticCategory.DustBotSkin,
+                CosmeticCategory.PathTrail,
+                CosmeticCategory.CrumbStyle,
+                CosmeticCategory.CatSkin,
+                CosmeticCategory.DockDesign,
+                CosmeticCategory.TileTheme,
+                CosmeticCategory.RoomTheme,
+                CosmeticCategory.Bundle
+            };
+        }
+
+        private static void CreateCategoryCard(
+            DustBotApp app,
+            RectTransform content,
+            CosmeticCategory category)
+        {
+            CosmeticCategory captured = category;
+            IReadOnlyList<CosmeticDefinition> items = CosmeticCatalog.ForCategory(category);
+            int owned = 0;
+            bool hasNew = false;
+            for (int i = 0; i < items.Count; i++)
+            {
+                bool owns = app.Cosmetics.Owns(items[i].id);
+                if (owns) owned++;
+                if (items[i].isNew && !owns) hasNew = true;
+            }
+
+            Button card = UIFactory.CreateButton(
+                "Category " + category,
+                content,
+                string.Empty,
+                delegate { app.UI.ShowCosmeticCategory(captured); },
+                new Color(1f, 0.995f, 0.965f, 0.98f),
+                20);
+            LayoutElement layout = card.gameObject.AddComponent<LayoutElement>();
+            layout.minHeight = 154f;
+            Text empty = UIFactory.GetButtonText(card);
+            if (empty != null) empty.gameObject.SetActive(false);
+
+            Image iconChip = UIFactory.CreatePanel("Icon Chip", card.transform, CategoryColor(category));
+            UIFactory.SetAnchors(iconChip.rectTransform, new Vector2(0.025f, 0.13f), new Vector2(0.18f, 0.87f), Vector2.zero, Vector2.zero);
+            iconChip.raycastTarget = false;
+            Image icon = UIFactory.CreateUIObject("Icon", iconChip.transform).AddComponent<Image>();
+            icon.sprite = CategoryIcon(category);
+            icon.preserveAspect = true;
+            icon.raycastTarget = false;
+            UIFactory.SetAnchors(icon.rectTransform, new Vector2(0.14f, 0.14f), new Vector2(0.86f, 0.86f), Vector2.zero, Vector2.zero);
+
+            Text title = UIFactory.CreateText("Category Name", card.transform, CategorySectionTitle(category), 30, DustBotTheme.Ink, TextAnchor.LowerLeft);
+            title.fontStyle = FontStyle.Bold;
+            UIFactory.SetAnchors(title.rectTransform, new Vector2(0.21f, 0.50f), new Vector2(0.72f, 0.88f), Vector2.zero, Vector2.zero);
+            Text description = UIFactory.CreateText("Category Description", card.transform, CategoryDescription(category), 19, DustBotTheme.MutedInk, TextAnchor.UpperLeft);
+            UIFactory.SetAnchors(description.rectTransform, new Vector2(0.21f, 0.11f), new Vector2(0.75f, 0.50f), Vector2.zero, Vector2.zero);
+            Text count = UIFactory.CreateText("Owned Count", card.transform, owned + " / " + items.Count + " OWNED", 20, DustBotTheme.MintDark);
+            count.fontStyle = FontStyle.Bold;
+            UIFactory.SetAnchors(count.rectTransform, new Vector2(0.73f, 0.25f), new Vector2(0.97f, 0.69f), Vector2.zero, Vector2.zero);
+
+            if (hasNew)
+            {
+                Image badge = UIFactory.CreatePanel("New Badge", card.transform, DustBotTheme.Coral);
+                UIFactory.SetAnchors(badge.rectTransform, new Vector2(0.82f, 0.72f), new Vector2(0.96f, 0.91f), Vector2.zero, Vector2.zero);
+                Text badgeText = UIFactory.CreateText("New", badge.transform, "NEW", 16, Color.white);
+                badgeText.fontStyle = FontStyle.Bold;
+                UIFactory.Stretch(badgeText.gameObject);
+            }
         }
 
         private static void AddStoreSection(
@@ -910,18 +1092,21 @@ namespace DustBot
             GridLayoutGroup grid = gridObject.AddComponent<GridLayoutGroup>();
             grid.constraint = GridLayoutGroup.Constraint.FixedColumnCount;
             grid.constraintCount = 2;
-            grid.cellSize = new Vector2(455f, 350f);
+            grid.cellSize = new Vector2(300f, ResponsiveStoreGrid.DefaultCardHeight);
             grid.spacing = new Vector2(22f, 22f);
             grid.childAlignment = TextAnchor.UpperCenter;
 
-            int rows = (items.Count + 1) / 2;
             LayoutElement gridLayout = gridObject.AddComponent<LayoutElement>();
-            gridLayout.minHeight = rows * grid.cellSize.y + Math.Max(0, rows - 1) * grid.spacing.y + 8f;
+            StoreGridMetrics initialMetrics = ResponsiveStoreGrid.Calculate(0f, items.Count);
+            gridLayout.minHeight = initialMetrics.preferredHeight;
+            gridLayout.preferredHeight = initialMetrics.preferredHeight;
+            ResponsiveStoreGrid responsiveGrid = gridObject.AddComponent<ResponsiveStoreGrid>();
 
             for (int i = 0; i < items.Count; i++)
             {
                 CreateCosmeticCard(app, grid.transform, items[i], category);
             }
+            responsiveGrid.Refresh();
         }
 
         private static void CreateCosmeticCard(
@@ -935,31 +1120,14 @@ namespace DustBot
             bool owned = app.Cosmetics.Owns(definition.id);
             bool requirementsMet = string.IsNullOrEmpty(lockReason);
             bool canAfford = app.Economy.Coins >= definition.coinPrice;
-            bool interactable = owned || (requirementsMet && canAfford);
             Button card = UIFactory.CreateButton(
                 "Cosmetic " + definition.id,
                 parent,
                 string.Empty,
-                delegate
-                {
-                    bool wasOwned = app.Cosmetics.Owns(captured.id);
-                    if (app.Cosmetics.TryUnlockOrSelect(captured.id))
-                    {
-                        if (wasOwned)
-                        {
-                            app.Audio.PlayStoreItemSelected();
-                        }
-                        else
-                        {
-                            app.Audio.PlayPurchaseSuccess();
-                        }
-                        app.SaveNow();
-                        app.UI.ShowCosmetics(refreshCategory, 0);
-                    }
-                },
+                delegate { app.UI.ShowCosmeticDetail(refreshCategory, captured.id); },
                 new Color(1f, 0.995f, 0.965f, 0.98f),
                 18);
-            card.interactable = interactable;
+            card.interactable = true;
             Text emptyLabel = UIFactory.GetButtonText(card);
             if (emptyLabel != null)
             {
@@ -1057,73 +1225,53 @@ namespace DustBot
             }
         }
 
-        private static List<CosmeticCategory> VisibleStoreCategories(CosmeticCategory preferred)
-        {
-            CosmeticCategory[] order =
-            {
-                CosmeticCategory.BotSkin,
-                CosmeticCategory.PathColor,
-                CosmeticCategory.TileTheme,
-                CosmeticCategory.DockDesign,
-                CosmeticCategory.WinAnimation,
-                CosmeticCategory.RoomBackground,
-                CosmeticCategory.Bundle
-            };
-            List<CosmeticCategory> categories = new List<CosmeticCategory>();
-            if (preferred != CosmeticCategory.FailureAnimation &&
-                Array.IndexOf(order, preferred) >= 0)
-            {
-                categories.Add(preferred);
-            }
-
-            for (int i = 0; i < order.Length; i++)
-            {
-                if (!categories.Contains(order[i]))
-                {
-                    categories.Add(order[i]);
-                }
-            }
-
-            return categories;
-        }
-
         private static void AddCosmeticPreview(Transform parent, CosmeticDefinition definition)
         {
-            if (definition.category == CosmeticCategory.PathColor)
+            if (definition.category == CosmeticCategory.PathTrail)
             {
                 Image track = UIFactory.CreatePanel("Trail Track", parent, new Color(1f, 1f, 1f, 0.55f));
-                UIFactory.SetAnchors(track.rectTransform, new Vector2(0.13f, 0.43f), new Vector2(0.87f, 0.58f), Vector2.zero, Vector2.zero);
+                UIFactory.SetAnchors(track.rectTransform, new Vector2(0.10f, 0.35f), new Vector2(0.90f, 0.65f), Vector2.zero, Vector2.zero);
                 track.raycastTarget = false;
-                Color route;
-                if (!ColorUtility.TryParseHtmlString(definition.colorHex, out route))
+                for (int i = 0; i < 5; i++)
                 {
-                    route = DustBotTheme.MintDark;
+                    Image node = UIFactory.CreateUIObject("Trail Node", track.transform).AddComponent<Image>();
+                    node.sprite = CosmeticSpriteLibrary.PathNode(definition.id);
+                    node.preserveAspect = true;
+                    node.raycastTarget = false;
+                    UIFactory.SetAnchors(node.rectTransform, new Vector2(0.02f + i * 0.20f, 0.02f), new Vector2(0.18f + i * 0.20f, 0.98f), Vector2.zero, Vector2.zero);
                 }
-
-                Image routeLine = UIFactory.CreatePanel("Trail", track.transform, route);
-                UIFactory.Stretch(routeLine.gameObject);
-                routeLine.raycastTarget = false;
                 return;
             }
 
-            if (definition.category == CosmeticCategory.RoomBackground ||
+            if (definition.category == CosmeticCategory.RoomTheme ||
                 definition.category == CosmeticCategory.TileTheme)
             {
                 CreateTwoTonePreview(parent, definition);
                 return;
             }
 
+            if (definition.category == CosmeticCategory.Bundle)
+            {
+                int count = definition.bundleItemIds == null ? 0 : Mathf.Min(3, definition.bundleItemIds.Length);
+                for (int i = 0; i < count; i++)
+                {
+                    CosmeticDefinition item = CosmeticCatalog.Find(definition.bundleItemIds[i]);
+                    Image bundleIcon = UIFactory.CreateUIObject("Bundle Item", parent).AddComponent<Image>();
+                    bundleIcon.sprite = CosmeticSpriteLibrary.Preview(item);
+                    bundleIcon.preserveAspect = true;
+                    bundleIcon.raycastTarget = false;
+                    UIFactory.SetAnchors(bundleIcon.rectTransform, new Vector2(0.08f + i * 0.29f, 0.18f), new Vector2(0.34f + i * 0.29f, 0.82f), Vector2.zero, Vector2.zero);
+                }
+                return;
+            }
+
             GameObject iconObject = UIFactory.CreateUIObject("Preview Icon", parent);
             Image icon = iconObject.AddComponent<Image>();
-            icon.sprite = CategoryIcon(definition.category);
+            icon.sprite = CosmeticSpriteLibrary.Preview(definition);
             icon.preserveAspect = true;
             icon.raycastTarget = false;
             UIFactory.SetAnchors(icon.rectTransform, new Vector2(0.25f, 0.12f), new Vector2(0.75f, 0.88f), Vector2.zero, Vector2.zero);
-            Color tint;
-            if (ColorUtility.TryParseHtmlString(definition.colorHex, out tint))
-            {
-                icon.color = tint;
-            }
+            icon.color = Color.white;
         }
 
         private static void CreateTwoTonePreview(Transform parent, CosmeticDefinition definition)
@@ -1147,7 +1295,11 @@ namespace DustBot
                     Image tile = UIFactory.CreatePanel(
                         "Preview Tile",
                         parent,
-                        (x + y) % 2 == 0 ? primary : secondary);
+                        Color.white);
+                    tile.sprite = definition.category == CosmeticCategory.RoomTheme
+                        ? CosmeticSpriteLibrary.Room(definition.id)
+                        : CosmeticSpriteLibrary.Tile(definition.id, (x + y) % 2 != 0);
+                    tile.type = Image.Type.Simple;
                     UIFactory.SetAnchors(
                         tile.rectTransform,
                         new Vector2(0.12f + x * 0.255f, 0.16f + y * 0.32f),
@@ -1241,7 +1393,7 @@ namespace DustBot
 
             if (owned)
             {
-                return definition.category == CosmeticCategory.Bundle ? "OWNED" : "EQUIP";
+                return definition.category == CosmeticCategory.Bundle ? "APPLY SET" : "EQUIP";
             }
 
             if (!requirementsMet)
@@ -1303,12 +1455,13 @@ namespace DustBot
         {
             switch (category)
             {
-                case CosmeticCategory.BotSkin: return "DUSTBOTS";
-                case CosmeticCategory.PathColor: return "TRAILS";
+                case CosmeticCategory.DustBotSkin: return "DUSTBOTS";
+                case CosmeticCategory.PathTrail: return "TRAILS";
+                case CosmeticCategory.CrumbStyle: return "CRUMBS";
+                case CosmeticCategory.CatSkin: return "CATS";
                 case CosmeticCategory.TileTheme: return "TILES";
                 case CosmeticCategory.DockDesign: return "DOCKS";
-                case CosmeticCategory.WinAnimation: return "CELEBRATIONS";
-                case CosmeticCategory.RoomBackground: return "ROOMS";
+                case CosmeticCategory.RoomTheme: return "ROOMS";
                 default: return "BUNDLES";
             }
         }
@@ -1317,12 +1470,13 @@ namespace DustBot
         {
             switch (category)
             {
-                case CosmeticCategory.BotSkin: return "DustBot Skins";
-                case CosmeticCategory.PathColor: return "Path Trails";
-                case CosmeticCategory.TileTheme: return "Tile Themes";
+                case CosmeticCategory.DustBotSkin: return "DustBot Skins";
+                case CosmeticCategory.PathTrail: return "Path Trails";
+                case CosmeticCategory.CrumbStyle: return "Crumb Styles";
+                case CosmeticCategory.CatSkin: return "Cat Skins";
+                case CosmeticCategory.TileTheme: return "Tile / Floor Themes";
                 case CosmeticCategory.DockDesign: return "Dock Designs";
-                case CosmeticCategory.WinAnimation: return "Win Celebrations";
-                case CosmeticCategory.RoomBackground: return "Room Themes";
+                case CosmeticCategory.RoomTheme: return "Room Themes";
                 default: return "Bundles";
             }
         }
@@ -1331,13 +1485,14 @@ namespace DustBot
         {
             switch (category)
             {
-                case CosmeticCategory.BotSkin: return "Big, readable robot looks for your tiny cleaning hero.";
-                case CosmeticCategory.PathColor: return "Clear route colors that keep drawing easy to follow.";
-                case CosmeticCategory.TileTheme: return "Floor palettes with stronger contrast and personality.";
-                case CosmeticCategory.DockDesign: return "Cute chargers for a triumphant little return home.";
-                case CosmeticCategory.WinAnimation: return "Victory flair for clean, efficient routes.";
-                case CosmeticCategory.RoomBackground: return "Distinct moods for the whole room backdrop.";
-                default: return "Curated sets with a cleaner total price.";
+                case CosmeticCategory.DustBotSkin: return "Change your cleaning hero.";
+                case CosmeticCategory.PathTrail: return "Customize your route.";
+                case CosmeticCategory.CrumbStyle: return "Change what DustBot cleans.";
+                case CosmeticCategory.CatSkin: return "Customize the chase.";
+                case CosmeticCategory.DockDesign: return "Change your charging station.";
+                case CosmeticCategory.TileTheme: return "Change the board.";
+                case CosmeticCategory.RoomTheme: return "Change the background.";
+                default: return "Matching cosmetic sets.";
             }
         }
 
@@ -1345,13 +1500,30 @@ namespace DustBot
         {
             switch (category)
             {
-                case CosmeticCategory.BotSkin: return DustBotSprites.Player;
+                case CosmeticCategory.DustBotSkin: return DustBotSprites.Player;
+                case CosmeticCategory.PathTrail: return CosmeticSpriteLibrary.PathNode("path_gold");
+                case CosmeticCategory.CrumbStyle: return DustBotSprites.Crumbs;
+                case CosmeticCategory.CatSkin: return DustBotSprites.Cat;
                 case CosmeticCategory.DockDesign: return DustBotSprites.Dock;
                 case CosmeticCategory.TileTheme: return DustBotSprites.Toy;
-                case CosmeticCategory.RoomBackground: return DustBotSprites.Wall;
+                case CosmeticCategory.RoomTheme: return DustBotSprites.Wall;
                 case CosmeticCategory.Bundle: return DustBotSprites.DustBunny;
-                case CosmeticCategory.WinAnimation: return DustBotSprites.Crumbs;
                 default: return null;
+            }
+        }
+
+        private static Color CategoryColor(CosmeticCategory category)
+        {
+            switch (category)
+            {
+                case CosmeticCategory.DustBotSkin: return new Color32(195, 232, 220, 255);
+                case CosmeticCategory.PathTrail: return new Color32(198, 220, 244, 255);
+                case CosmeticCategory.CrumbStyle: return new Color32(244, 220, 174, 255);
+                case CosmeticCategory.CatSkin: return new Color32(246, 203, 182, 255);
+                case CosmeticCategory.DockDesign: return new Color32(218, 209, 244, 255);
+                case CosmeticCategory.TileTheme: return new Color32(213, 229, 196, 255);
+                case CosmeticCategory.RoomTheme: return new Color32(242, 205, 226, 255);
+                default: return new Color32(250, 224, 145, 255);
             }
         }
 
@@ -1462,7 +1634,7 @@ namespace DustBot
                 case GenerationMode.ObstacleTesting: return "OBSTACLES 18";
                 case GenerationMode.TutorialTesting: return "TUTORIALS 8";
                 case GenerationMode.MazeTesting: return "MAZES 20";
-                default: return "PRODUCTION 260";
+                default: return "PRODUCTION 255";
             }
         }
 

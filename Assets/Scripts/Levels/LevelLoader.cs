@@ -31,30 +31,7 @@ namespace DustBot
         public LevelDefinition LoadCategory(LevelCategory category, int levelNumber)
         {
             levelNumber = LevelCategoryCatalog.ClampLevel(category, levelNumber);
-            LevelDefinition level;
-            if (category == LevelCategory.Easy)
-            {
-                level = TutorialLevelCatalog.Get(levelNumber);
-                level.id = string.Format("Category_{0}_{1:000}", category, levelNumber);
-                level.category = category;
-                level.generationMode = GenerationMode.ProductionCampaign;
-                level.generationVersion = LevelManifest.CurrentGenerationVersion;
-                level.difficultyTier = LevelCategoryCatalog.Difficulty(category, levelNumber);
-            }
-            else if (category == LevelCategory.Medium && levelNumber == 1)
-            {
-                level = CatTutorialLevelCatalog.GetIntroduction();
-                level.id = "Category_Medium_001";
-                level.levelNumber = 1;
-                level.category = category;
-                level.generationMode = GenerationMode.ProductionCampaign;
-                level.tutorialMessage =
-                    "CAT CHASE • Swipe one tile. Then the cat moves twice, horizontal first. Use furniture, clean, and dock.";
-            }
-            else
-            {
-                level = generator.Generate(manifest.GetCategoryEntry(category, levelNumber), GameMode.MainJourney);
-            }
+            LevelDefinition level = CuratedLevelCatalog.Get(category, levelNumber);
 
             ValidateOrThrow(level);
             return level;

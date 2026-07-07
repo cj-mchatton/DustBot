@@ -18,6 +18,13 @@ namespace DustBot
         public static Sprite DustBunny { get { return Load("dust-bunny"); } }
         public static Sprite Cat { get { return Load("cat"); } }
 
+        public static Sprite Cosmetic(string cosmeticId)
+        {
+            return string.IsNullOrEmpty(cosmeticId)
+                ? null
+                : Load("Cosmetics/" + cosmeticId);
+        }
+
         public static Sprite ForCell(CellContent content)
         {
             switch (content)

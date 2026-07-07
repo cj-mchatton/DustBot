@@ -56,7 +56,11 @@ namespace DustBot
                 }
             }
 
-            if (definition.category != CosmeticCategory.Bundle)
+            if (definition.category == CosmeticCategory.Bundle)
+            {
+                EquipBundle(definition);
+            }
+            else
             {
                 Select(definition);
             }
@@ -190,6 +194,36 @@ namespace DustBot
             get { return progression.Data.cosmetics.activeBotSkinId; }
         }
 
+        public string ActivePathTrailId
+        {
+            get { return progression.Data.cosmetics.activePathColorId; }
+        }
+
+        public string ActiveCrumbStyleId
+        {
+            get { return progression.Data.cosmetics.activeCrumbStyleId; }
+        }
+
+        public string ActiveCatSkinId
+        {
+            get { return progression.Data.cosmetics.activeCatSkinId; }
+        }
+
+        public string ActiveDockDesignId
+        {
+            get { return progression.Data.cosmetics.activeDockDesignId; }
+        }
+
+        public string ActiveTileThemeId
+        {
+            get { return progression.Data.cosmetics.activeTileThemeId; }
+        }
+
+        public string ActiveRoomThemeId
+        {
+            get { return progression.Data.cosmetics.activeRoomBackgroundId; }
+        }
+
         public string GrantMilestoneCosmetics()
         {
             IReadOnlyList<CosmeticDefinition> all = CosmeticCatalog.All;
@@ -213,10 +247,14 @@ namespace DustBot
         {
             switch (definition.category)
             {
-                case CosmeticCategory.BotSkin:
+                case CosmeticCategory.DustBotSkin:
                     return progression.Data.cosmetics.activeBotSkinId == definition.id;
-                case CosmeticCategory.PathColor:
+                case CosmeticCategory.PathTrail:
                     return progression.Data.cosmetics.activePathColorId == definition.id;
+                case CosmeticCategory.CrumbStyle:
+                    return progression.Data.cosmetics.activeCrumbStyleId == definition.id;
+                case CosmeticCategory.CatSkin:
+                    return progression.Data.cosmetics.activeCatSkinId == definition.id;
                 case CosmeticCategory.TileTheme:
                     return progression.Data.cosmetics.activeTileThemeId == definition.id;
                 case CosmeticCategory.DockDesign:
@@ -225,7 +263,7 @@ namespace DustBot
                     return progression.Data.cosmetics.activeWinAnimationId == definition.id;
                 case CosmeticCategory.FailureAnimation:
                     return progression.Data.cosmetics.activeFailureAnimationId == definition.id;
-                case CosmeticCategory.RoomBackground:
+                case CosmeticCategory.RoomTheme:
                     return progression.Data.cosmetics.activeRoomBackgroundId == definition.id;
                 default:
                     return false;
@@ -236,11 +274,17 @@ namespace DustBot
         {
             switch (definition.category)
             {
-                case CosmeticCategory.BotSkin:
+                case CosmeticCategory.DustBotSkin:
                     progression.Data.cosmetics.activeBotSkinId = definition.id;
                     break;
-                case CosmeticCategory.PathColor:
+                case CosmeticCategory.PathTrail:
                     progression.Data.cosmetics.activePathColorId = definition.id;
+                    break;
+                case CosmeticCategory.CrumbStyle:
+                    progression.Data.cosmetics.activeCrumbStyleId = definition.id;
+                    break;
+                case CosmeticCategory.CatSkin:
+                    progression.Data.cosmetics.activeCatSkinId = definition.id;
                     break;
                 case CosmeticCategory.TileTheme:
                     progression.Data.cosmetics.activeTileThemeId = definition.id;
@@ -254,9 +298,26 @@ namespace DustBot
                 case CosmeticCategory.FailureAnimation:
                     progression.Data.cosmetics.activeFailureAnimationId = definition.id;
                     break;
-                case CosmeticCategory.RoomBackground:
+                case CosmeticCategory.RoomTheme:
                     progression.Data.cosmetics.activeRoomBackgroundId = definition.id;
                     break;
+            }
+        }
+
+        private void EquipBundle(CosmeticDefinition bundle)
+        {
+            if (bundle.bundleItemIds == null)
+            {
+                return;
+            }
+
+            for (int i = 0; i < bundle.bundleItemIds.Length; i++)
+            {
+                CosmeticDefinition item = CosmeticCatalog.Find(bundle.bundleItemIds[i]);
+                if (item != null && Owns(item.id))
+                {
+                    Select(item);
+                }
             }
         }
 

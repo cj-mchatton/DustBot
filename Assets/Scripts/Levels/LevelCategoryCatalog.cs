@@ -15,7 +15,7 @@ namespace DustBot
 
     public static class LevelCategoryCatalog
     {
-        public const int TotalLevelCount = 260;
+        public const int TotalLevelCount = 255;
 
         private static readonly LevelCategory[] OrderedCategories =
         {
@@ -29,7 +29,7 @@ namespace DustBot
         private static readonly Dictionary<LevelCategory, LevelCategoryProfile> Profiles =
             new Dictionary<LevelCategory, LevelCategoryProfile>
             {
-                { LevelCategory.Easy, Profile(LevelCategory.Easy, "EASY", "Learn the basics.", 10, 0, 0) },
+                { LevelCategory.Easy, Profile(LevelCategory.Easy, "EASY", "Five focused lessons in cleaning, collecting, cats, and route planning.", 5, 1, 0) },
                 { LevelCategory.Medium, Profile(LevelCategory.Medium, "MEDIUM", "Maze puzzles with some cat chase levels.", 50, 15, 35) },
                 { LevelCategory.Hard, Profile(LevelCategory.Hard, "HARD", "Large maze challenges.", 50, 5, 45) },
                 { LevelCategory.Expert, Profile(LevelCategory.Expert, "EXPERT", "The hardest DustBot puzzles.", 100, 25, 75) },
@@ -56,9 +56,14 @@ namespace DustBot
             levelNumber = ClampLevel(category, levelNumber);
             switch (category)
             {
+                case LevelCategory.Easy:
+                    return levelNumber == 4;
                 case LevelCategory.Medium:
-                    // 15 of 50, including an early introduction at Medium 3.
-                    return (levelNumber - 1) % 10 < 3;
+                    return levelNumber == 3 || levelNumber == 6 || levelNumber == 10 ||
+                           levelNumber == 13 || levelNumber == 17 || levelNumber == 20 ||
+                           levelNumber == 23 || levelNumber == 27 || levelNumber == 30 ||
+                           levelNumber == 33 || levelNumber == 37 || levelNumber == 40 ||
+                           levelNumber == 43 || levelNumber == 47 || levelNumber == 50;
                 case LevelCategory.Hard:
                     return levelNumber % 10 == 0;
                 case LevelCategory.Expert:

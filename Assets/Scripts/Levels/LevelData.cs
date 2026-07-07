@@ -399,6 +399,8 @@ namespace DustBot
         public string mechanicSet = "DrawPath";
         public string objectiveSet = "CleanAndDock";
         public string tutorialMessage;
+        public string designPurpose;
+        public string intendedStrategy;
         public List<GridCellDefinition> cells = new List<GridCellDefinition>();
         public List<SolutionStep> expectedSolution = new List<SolutionStep>();
         public LevelObjective objectives = new LevelObjective();

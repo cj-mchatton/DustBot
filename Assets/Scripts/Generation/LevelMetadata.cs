@@ -16,7 +16,10 @@ namespace DustBot
             bool valid = LevelValidator.TryValidate(level, out validation);
             LevelEngagementReport report = LevelEngagementEvaluator.Analyze(level);
             StringBuilder builder = new StringBuilder(480);
-            builder.Append("Generation mode: ").Append(level.generationMode).Append('\n')
+            builder.Append(level.category != LevelCategory.None
+                    ? "Content source: fixed curated catalog\n"
+                    : "Content source: generated non-campaign mode\n")
+                .Append("Generation mode: ").Append(level.generationMode).Append('\n')
                 .Append("Level number: ").Append(level.levelNumber).Append('\n');
             if (level.category != LevelCategory.None)
                 builder.Append("Category: ").Append(LevelCategoryCatalog.Name(level.category)).Append('\n');
@@ -86,6 +89,10 @@ namespace DustBot
                 .Append("Solver / validator: ").Append(valid ? "Valid" : validation).Append('\n')
                 .Append("Ideal cost: ").Append(level.parMoves).Append('\n')
                 .Append("Hard max: ").Append(level.hardPathLimit ? level.moveLimit.ToString() : "none");
+            if (!string.IsNullOrEmpty(level.designPurpose))
+                builder.Append('\n').Append("Design purpose: ").Append(level.designPurpose);
+            if (!string.IsNullOrEmpty(level.intendedStrategy))
+                builder.Append('\n').Append("Intended strategy: ").Append(level.intendedStrategy);
             return builder.ToString();
         }
 

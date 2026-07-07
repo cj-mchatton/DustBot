@@ -73,6 +73,7 @@ namespace DustBot.Editor
             int catLevelCount = 0;
             int largeMazeLevelCount = 0;
             int totalLevels = 0;
+            HashSet<string> gameplayLayouts = new HashSet<string>();
             foreach (LevelCategory category in LevelCategoryCatalog.All)
             {
                 LevelCategoryProfile profile = LevelCategoryCatalog.Get(category);
@@ -87,6 +88,14 @@ namespace DustBot.Editor
                         LevelCategoryCatalog.LevelName(category, number) + " was not deterministic.");
                     Require(first.category == category && first.levelNumber == number,
                         "Category metadata is incorrect for " + LevelCategoryCatalog.LevelName(category, number));
+                    Require(first.seed == CuratedLevelCatalog.Revision,
+                        LevelCategoryCatalog.LevelName(category, number) + " is not sourced from the fixed catalog revision.");
+                    Require(!string.IsNullOrEmpty(first.designPurpose) &&
+                            !string.IsNullOrEmpty(first.intendedStrategy),
+                        LevelCategoryCatalog.LevelName(category, number) + " is missing its design review notes.");
+                    Require(gameplayLayouts.Add(LevelValidator.LayoutSignature(first)),
+                        LevelCategoryCatalog.LevelName(category, number) + " duplicates another gameplay layout.");
+                    ValidateCuratedContents(first, LevelCategoryCatalog.LevelName(category, number));
                     bool expectedCat = LevelCategoryCatalog.IsCatLevel(category, number);
                     Require(first.cat != null && first.cat.IsEnabled == expectedCat,
                         "Cat distribution is incorrect for " + LevelCategoryCatalog.LevelName(category, number));
@@ -111,11 +120,15 @@ namespace DustBot.Editor
                     profile.displayName + " maze distribution does not match its profile.");
             }
 
-            Require(totalLevels == 260, "The production category catalog does not contain 260 levels.");
-            Require(catLevelCount == 95, "The category catalog should contain exactly 95 cat levels.");
+            Require(totalLevels == 255 && CuratedLevelCatalog.Count == 255,
+                "The production category catalog does not contain exactly 255 fixed levels.");
+            Require(catLevelCount == 96, "The category catalog should contain exactly 96 cat levels including Easy 4.");
             Require(largeMazeLevelCount == 155, "The category catalog should contain exactly 155 maze levels.");
-            Require(loader.LoadCategory(LevelCategory.Medium, 1).cat.behavior == CatBehavior.Curious,
-                "The Medium cat introduction level is missing.");
+            Require(loader.LoadCategory(LevelCategory.Easy, 4).cat.behavior == CatBehavior.Curious,
+                "The Easy 4 cat introduction level is missing.");
+            for (int easy = 1; easy <= 5; easy++)
+                Require(!string.IsNullOrEmpty(loader.LoadCategory(LevelCategory.Easy, easy).tutorialMessage),
+                    "Easy " + easy + " is missing tutorial text.");
 
             DateTime date = new DateTime(2026, 6, 22);
             LevelDefinition dailyA = loader.LoadDaily(date);
@@ -152,17 +165,16 @@ namespace DustBot.Editor
             Require(masterA.hardPathLimit, "Master Clean reset to a soft early-game profile.");
             ValidateAndSimulate(masterA, "Master 500");
 
-            ValidateHazardBlocking(loader.LoadCategory(LevelCategory.Easy, 7));
-            ValidateCatTurnMechanic(loader.LoadCategory(LevelCategory.Medium, 1));
+            ValidateCatTurnMechanic(loader.LoadCategory(LevelCategory.Easy, 4));
             ValidateDevelopmentModes(loader);
             ValidateProgression();
             Debug.Log(
-                "DUSTBOT_VALIDATION_PASSED: 260 category levels, " +
+                "DUSTBOT_VALIDATION_PASSED: 255 fixed curated category levels, " +
                 catLevelCount +
                 " deterministic cat levels, " +
                 largeMazeLevelCount +
-                " large mazes, engagement pacing, archetypes, tutorials, " +
-                "daily, master, economy claims, cosmetics, route simulation, hazards, and progression.");
+                " large mazes, unique layouts, design notes, tutorials, " +
+                "daily, master, economy claims, cosmetics, route simulation, and progression.");
         }
 
         [MenuItem("DustBot/Run Development Mode Validation")]
@@ -502,15 +514,17 @@ namespace DustBot.Editor
             }
         }
 
-        private static void ValidateHazardBlocking(LevelDefinition tutorial)
+        private static void ValidateCuratedContents(LevelDefinition level, string label)
         {
-            GameSession session = new GameSession(tutorial);
-            Require(
-                session.BeginPath(session.Grid.Start) == PathEditResult.Started,
-                "Hazard test route could not begin.");
-            Require(
-                session.TryExtendPath(new GridPosition(1, 3)) == PathEditResult.Invalid,
-                "Sock hazard did not block path drawing.");
+            for (int i = 0; i < level.cells.Count; i++)
+            {
+                CellContent content = level.cells[i].content;
+                Require(
+                    content == CellContent.Start || content == CellContent.Dock ||
+                    content == CellContent.Crumb || content == CellContent.Wall ||
+                    content == CellContent.Toy,
+                    label + " contains retired special tile " + content + ".");
+            }
         }
 
         private static void ValidateCatTurnMechanic(LevelDefinition tutorial)
@@ -693,18 +707,28 @@ namespace DustBot.Editor
             Require(repaired.Data.daily != null && repaired.Data.settings != null, "Null nested save data was not repaired.");
             Require(
                 repaired.Data.cosmetics != null &&
-                repaired.Data.cosmetics.ownedCosmeticIds.Contains(CosmeticCatalog.DefaultBot),
+                repaired.Data.cosmetics.ownedCosmeticIds.Contains(CosmeticCatalog.DefaultBot) &&
+                repaired.Data.cosmetics.ownedCosmeticIds.Contains(CosmeticCatalog.DefaultCrumbStyle) &&
+                repaired.Data.cosmetics.ownedCosmeticIds.Contains(CosmeticCatalog.DefaultCatSkin),
                 "Cosmetic inventory was not repaired.");
             Require(repaired.Data.dustCoins == 0, "Negative currency was not repaired.");
             Require(!string.IsNullOrEmpty(repaired.Data.endlessRunSeed), "Endless run seed was not repaired.");
 
             EconomySystem economy = new EconomySystem(progression);
             CosmeticSystem cosmetics = new CosmeticSystem(progression, economy);
-            progression.Data.dustCoins = 1000;
+            progression.Data.dustCoins = 3000;
             Require(cosmetics.TryUnlockOrSelect("path_coral"), "Coin cosmetic could not be unlocked.");
             Require(
                 progression.Data.cosmetics.activePathColorId == "path_coral",
                 "Unlocked cosmetic could not be selected.");
+            Require(cosmetics.TryUnlockOrSelect("crumb_cookie"), "Crumb style could not be purchased.");
+            Require(
+                progression.Data.cosmetics.activeCrumbStyleId == "crumb_cookie",
+                "Crumb style could not be equipped.");
+            Require(cosmetics.TryUnlockOrSelect("cat_tuxedo"), "Cat skin could not be purchased.");
+            Require(
+                progression.Data.cosmetics.activeCatSkinId == "cat_tuxedo",
+                "Cat skin could not be equipped.");
             Require(
                 !cosmetics.TryUnlockOrSelect("bot_gold"),
                 "Achievement-locked legendary cosmetic could be purchased early.");
@@ -714,6 +738,20 @@ namespace DustBot.Editor
             Require(
                 CosmeticCatalog.All.Count >= 50,
                 "Cosmetic catalog did not expand meaningfully.");
+            CosmeticCategory[] storeCategories =
+            {
+                CosmeticCategory.DustBotSkin,
+                CosmeticCategory.PathTrail,
+                CosmeticCategory.CrumbStyle,
+                CosmeticCategory.CatSkin,
+                CosmeticCategory.DockDesign,
+                CosmeticCategory.TileTheme,
+                CosmeticCategory.RoomTheme,
+                CosmeticCategory.Bundle
+            };
+            for (int i = 0; i < storeCategories.Length; i++)
+                Require(CosmeticCatalog.ForCategory(storeCategories[i]).Count > 0,
+                    "Cosmetic store category was empty: " + storeCategories[i]);
         }
 
         private static void ConfigureAppIcon()

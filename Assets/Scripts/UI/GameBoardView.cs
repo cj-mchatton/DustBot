@@ -80,7 +80,13 @@ namespace DustBot
                            session.State == GameSessionState.CatTurn;
             if (editing && bot != null && !drawing)
             {
-                bot.localScale = Vector3.one * (0.92f + wave * 0.014f);
+                float personality = cosmetics.ActiveBotSkinId == "bot_retro" ? 0.009f : 0.018f;
+                bot.localScale = new Vector3(
+                    0.92f + wave * personality,
+                    0.92f - wave * personality * 0.55f,
+                    1f);
+                if (cosmetics.ActiveBotSkinId == "bot_arcade")
+                    bot.localRotation = Quaternion.Euler(0f, 0f, wave * 2.2f);
             }
 
             if (editing && startGlow != null)
@@ -108,6 +114,24 @@ namespace DustBot
                         DustBotTheme.Warning.g,
                         DustBotTheme.Warning.b,
                         dangerAlpha);
+                }
+            }
+
+            if (routeNodes.Count > 0 &&
+                (cosmetics.ActivePathTrailId == "path_neon" ||
+                 cosmetics.ActivePathTrailId == "path_rainbow" ||
+                 cosmetics.ActivePathTrailId == "path_bubble"))
+            {
+                Color animated = PathColorAtTime();
+                for (int i = 0; i < routeNodes.Count; i++)
+                {
+                    if (!routeNodes[i].gameObject.activeSelf) continue;
+                    routeNodes[i].rectTransform.localScale = Vector3.one *
+                        (1f + Mathf.Sin(Time.unscaledTime * 3.5f + i * 0.7f) * 0.08f);
+                    if (cosmetics.ActivePathTrailId == "path_rainbow")
+                        routeNodes[i].color = Color.HSVToRGB(Mathf.Repeat(Time.unscaledTime * 0.12f + i * 0.08f, 1f), 0.65f, 1f);
+                    else if (cosmetics.ActivePathTrailId == "path_neon")
+                        routeNodes[i].color = animated;
                 }
             }
 
@@ -223,23 +247,24 @@ namespace DustBot
         {
             CellVisual cell = cells[position.x, position.y];
             CellContent content = session.Grid.GetContent(position);
-            cell.baseColor = TileColor(
-                content,
-                (position.x + position.y) % 2 == 0
-                    ? cosmetics.ActiveTileA
-                    : cosmetics.ActiveTileB);
+            bool alternate = (position.x + position.y) % 2 != 0;
+            cell.background.sprite = CosmeticSpriteLibrary.Tile(cosmetics.ActiveTileThemeId, alternate);
+            cell.background.type = Image.Type.Simple;
+            cell.baseColor = TileColor(content, Color.white);
             cell.background.color = session.IsPathCell(position)
-                ? Color.Lerp(cell.baseColor, cosmetics.ActivePathColor, 0.2f)
+                ? Color.Lerp(cell.baseColor, PathColorAtTime(), 0.2f)
                 : cell.baseColor;
 
             Sprite contentSprite = DustBotSprites.ForCell(content);
+            if (content == CellContent.Crumb)
+                contentSprite = CosmeticSpriteLibrary.Crumb(cosmetics.ActiveCrumbStyleId);
+            else if (content == CellContent.Dock)
+                contentSprite = CosmeticSpriteLibrary.Dock(cosmetics.ActiveDockDesignId);
             bool contentVisible = contentSprite != null &&
                                   (content != CellContent.Crumb || session.HasCrumb(position));
             cell.contentSprite.sprite = contentSprite;
             cell.contentSprite.gameObject.SetActive(contentVisible);
-            cell.contentSprite.color = content == CellContent.Dock
-                ? cosmetics.ActiveDockTint
-                : Color.white;
+            cell.contentSprite.color = Color.white;
 
             string label = ContentLabel(content);
             cell.contentLabel.text = label;
@@ -1145,12 +1170,12 @@ namespace DustBot
                 : Mathf.Clamp(shortestCell * 0.14f, 10f, 25f);
             Color routeColor = session.State == GameSessionState.Editing
                 ? session.CanStillEarnThreeStars
-                    ? cosmetics.ActivePathColor
+                    ? PathColorAtTime()
                     : DustBotTheme.Warning
                 : new Color(
-                    cosmetics.ActivePathColor.r,
-                    cosmetics.ActivePathColor.g,
-                    cosmetics.ActivePathColor.b,
+                    PathColorAtTime().r,
+                    PathColorAtTime().g,
+                    PathColorAtTime().b,
                     0.48f);
 
             int segmentCount = Mathf.Max(0, path.Count - 1);
@@ -1173,6 +1198,7 @@ namespace DustBot
             for (int i = 0; i < path.Count; i++)
             {
                 Image node = GetRouteImage(routeNodes, i, "Route Node", SpriteFactory.Circle);
+                node.sprite = CosmeticSpriteLibrary.PathNode(cosmetics.ActivePathTrailId);
                 node.rectTransform.anchoredPosition = LocalCenterFor(path[i]);
                 float nodeSize = i == 0 ? thickness * 1.75f : thickness * 1.35f;
                 node.rectTransform.sizeDelta = Vector2.one * nodeSize;
@@ -1360,6 +1386,8 @@ namespace DustBot
 
             bool active = session.HasCat;
             cat.gameObject.SetActive(active);
+            catImage.sprite = CosmeticSpriteLibrary.Cat(cosmetics.ActiveCatSkinId);
+            catImage.color = Color.white;
             if (catDangerGlow != null)
             {
                 catDangerGlow.gameObject.SetActive(active);
@@ -1514,13 +1542,17 @@ namespace DustBot
                 ? new Vector2(0f, Mathf.Clamp(cellHeight * 0.08f, 6f, 16f))
                 : Vector2.zero;
             bot.localScale = editing ? Vector3.one * 0.92f : Vector3.one;
-            botImage.color = editing
-                ? new Color(
-                    cosmetics.ActiveBotTint.r,
-                    cosmetics.ActiveBotTint.g,
-                    cosmetics.ActiveBotTint.b,
-                    0.95f)
-                : cosmetics.ActiveBotTint;
+            botImage.sprite = CosmeticSpriteLibrary.DustBot(cosmetics.ActiveBotSkinId);
+            botImage.color = editing ? new Color(1f, 1f, 1f, 0.96f) : Color.white;
+        }
+
+        private Color PathColorAtTime()
+        {
+            if (cosmetics.ActivePathTrailId == "path_rainbow")
+                return Color.HSVToRGB(Mathf.Repeat(Time.unscaledTime * 0.12f, 1f), 0.68f, 0.94f);
+            if (cosmetics.ActivePathTrailId == "path_neon")
+                return Color.Lerp(cosmetics.ActivePathColor, Color.white, (Mathf.Sin(Time.unscaledTime * 3f) + 1f) * 0.12f);
+            return cosmetics.ActivePathColor;
         }
 
         private Vector2 AnchorFor(GridPosition position)

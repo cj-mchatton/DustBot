@@ -334,6 +334,18 @@ namespace DustBot
             UI.ShowCosmetics();
             yield return CaptureAfterLayout(Path.Combine(path, "06-cosmetics.png"));
 
+            UI.ShowCosmeticCategory(CosmeticCategory.CrumbStyle);
+            yield return CaptureAfterLayout(Path.Combine(path, "06b-crumb-styles.png"));
+
+            UI.ShowCosmeticCategory(CosmeticCategory.DustBotSkin);
+            yield return CaptureAfterLayout(Path.Combine(path, "06d-dustbot-skins.png"));
+
+            UI.ShowCosmeticCategory(CosmeticCategory.CatSkin);
+            yield return CaptureAfterLayout(Path.Combine(path, "06e-cat-skins.png"));
+
+            UI.ShowCosmeticDetail(CosmeticCategory.CrumbStyle, "crumb_cookie");
+            yield return CaptureAfterLayout(Path.Combine(path, "06c-cosmetic-detail.png"));
+
             Debug.Log("DUSTBOT_SCREENSHOTS_CAPTURED: " + path);
             Application.Quit();
         }
@@ -362,6 +374,11 @@ namespace DustBot
             {
                 CosmeticCatalog.DefaultBot,
                 CosmeticCatalog.DefaultPath,
+                CosmeticCatalog.DefaultCrumbStyle,
+                CosmeticCatalog.DefaultCatSkin,
+                CosmeticCatalog.DefaultDock,
+                CosmeticCatalog.DefaultTileTheme,
+                CosmeticCatalog.DefaultRoomBackground,
                 "bot_lavender",
                 "path_coral"
             };

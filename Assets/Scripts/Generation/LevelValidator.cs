@@ -71,6 +71,17 @@ namespace DustBot
 
                 if (cell.content == CellContent.Start) startCount++;
                 if (cell.content == CellContent.Dock) dockCount++;
+                if (level.mode == GameMode.MainJourney &&
+                    level.category != LevelCategory.None &&
+                    cell.content != CellContent.Start &&
+                    cell.content != CellContent.Dock &&
+                    cell.content != CellContent.Crumb &&
+                    cell.content != CellContent.Wall &&
+                    cell.content != CellContent.Toy)
+                {
+                    message = "Curated main levels may only use normal floor and furniture blockers.";
+                    return false;
+                }
             }
 
             if (startCount != 1 || dockCount != 1)
@@ -439,6 +450,21 @@ namespace DustBot
                     .Append(':').Append((int)step.direction);
             }
 
+            return builder.ToString();
+        }
+
+        public static string LayoutSignature(LevelDefinition level)
+        {
+            StringBuilder builder = new StringBuilder(level.width * level.height + 64);
+            builder.Append(level.width).Append('x').Append(level.height).Append('|');
+            for (int y = level.height - 1; y >= 0; y--)
+            {
+                for (int x = 0; x < level.width; x++)
+                    builder.Append((char)('A' + (int)level.GetContent(new GridPosition(x, y))));
+            }
+            builder.Append('|').Append(level.bonusPosition.x).Append(',').Append(level.bonusPosition.y)
+                .Append('|').Append(level.cat.startPosition.x).Append(',').Append(level.cat.startPosition.y)
+                .Append('|').Append((int)level.catPuzzleArchetype);
             return builder.ToString();
         }
     }

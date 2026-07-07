@@ -88,13 +88,25 @@ namespace DustBot
 
         public void ShowCosmetics()
         {
-            ShowCosmetics(CosmeticCategory.BotSkin, 0);
+            if (app.Audio != null) app.Audio.PlayMenuMusic();
+            SwitchTo(MenuScreens.BuildCosmeticCategorySelect(app, safeArea));
         }
 
         public void ShowCosmetics(CosmeticCategory category, int page = 0)
         {
+            ShowCosmeticCategory(category);
+        }
+
+        public void ShowCosmeticCategory(CosmeticCategory category)
+        {
             if (app.Audio != null) app.Audio.PlayMenuMusic();
-            SwitchTo(MenuScreens.BuildCosmetics(app, safeArea, category, page));
+            SwitchTo(MenuScreens.BuildCosmeticCategory(app, safeArea, category));
+        }
+
+        public void ShowCosmeticDetail(CosmeticCategory category, string cosmeticId)
+        {
+            if (app.Audio != null) app.Audio.PlayMenuMusic();
+            SwitchTo(MenuScreens.BuildCosmeticDetail(app, safeArea, category, cosmeticId));
         }
 
         public void ShowDeveloperPanel()
@@ -219,7 +231,9 @@ namespace DustBot
         {
             if (background != null && app != null && app.Cosmetics != null)
             {
-                background.color = app.Cosmetics.ActiveRoomBackground;
+                background.sprite = CosmeticSpriteLibrary.Room(app.Cosmetics.ActiveRoomThemeId);
+                background.type = Image.Type.Simple;
+                background.color = Color.white;
             }
 
             if (currentScreen != null && currentScreen != screen)

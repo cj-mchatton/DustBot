@@ -29,7 +29,7 @@ Furniture, corners, and corridors become tools for cleaning safely.
 
 ## Complete game modes
 
-- **Main levels:** 260 deterministic rooms split into Easy (10), Medium (50), Hard (50), Expert (100), and Cat Chase (50).
+- **Main levels:** 255 fixed, curated rooms split into Easy (5), Medium (50), Hard (50), Expert (100), and Cat Chase (50). Category + level number always decodes the same committed definition; production layouts are never generated or shuffled at runtime.
 - **Daily Challenge:** one deterministic room per calendar day with streak rewards.
 - **Master Clean:** unlocks after completing all Expert levels.
 - **Endless Clean:** persistent room progression and best score.
@@ -38,7 +38,7 @@ Furniture, corners, and corridors become tools for cleaning safely.
 
 Unity Editor and development builds default to a deterministic 30-level
 Development Campaign. Open **DEV** from the main menu or any level header to
-switch among Production Categories (260), Development Campaign (30), Maze
+switch among Production Categories (255), Development Campaign (30), Maze
 Testing (20), Cat Testing (24), Obstacle Testing (18), and Tutorial Testing (8).
 Non-development release builds always force Production Categories and do not
 expose the panel.
@@ -51,16 +51,19 @@ not advance production journey, Daily Challenge, or Master Clean progress.
 Progress, settings, stars, Dust Coins, Dust Bunnies, cosmetics, daily streaks,
 and endless progress are saved locally with a backup-safe JSON save system.
 
-The Cosmetic Store contains categorized skins, trails, tile themes, docks,
-animations, room backgrounds, and bundles with rarity, coin prices, and
-achievement requirements.
+The Cosmetic Store opens to eight mobile-friendly categories: DustBot skins,
+path trails, crumb styles, cat skins, docks, tile/floor themes, room themes,
+and bundles. Each category has a vertical card grid and large item details with
+rarity, prices, unlock requirements, ownership, and equip state. Cosmetics can
+swap silhouettes, object sprites, route textures, floor patterns, room moods,
+and lightweight animations without changing gameplay rules.
 
 ## Release validation
 
 Use these Unity menu commands:
 
 - `DustBot > Configure Project` applies the iPhone release settings and app icon.
-- `DustBot > Run Content Validation` compiles and simulates all 260 category levels plus tutorial, daily, master, hazard, determinism, reward, and save-repair checks.
+- `DustBot > Run Content Validation` compiles and simulates all 255 curated category levels plus Daily, Master, determinism, uniqueness, retired-tile, reward, and save-repair checks.
 - `DustBot > Run Development Mode Validation` checks and simulates every compact testing playlist twice for determinism.
 - `DustBot > Validate Large Mazes` checks the Dev Level 9 baseline, nine advanced Development Campaign mazes, all 20 Maze Testing fixtures through 26×26, and the existing production Master fixture. It audits topology and draws each canonical long route through the gameplay input system.
 - `DustBot > Build iOS Release` validates the game and creates the Xcode project at `Build/iOS`.

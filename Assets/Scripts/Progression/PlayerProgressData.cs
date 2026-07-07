@@ -47,6 +47,8 @@ namespace DustBot
         };
         public string activeBotSkinId = CosmeticCatalog.DefaultBot;
         public string activePathColorId = CosmeticCatalog.DefaultPath;
+        public string activeCrumbStyleId = CosmeticCatalog.DefaultCrumbStyle;
+        public string activeCatSkinId = CosmeticCatalog.DefaultCatSkin;
         public string activeTileThemeId = CosmeticCatalog.DefaultTileTheme;
         public string activeDockDesignId = CosmeticCatalog.DefaultDock;
         public string activeWinAnimationId = CosmeticCatalog.DefaultWinAnimation;

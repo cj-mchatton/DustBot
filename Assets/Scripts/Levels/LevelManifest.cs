@@ -6,75 +6,9 @@ namespace DustBot
     public sealed class LevelManifest
     {
         // Kept as a compatibility alias for developer tooling. Production play
-        // is category-based and contains 260 total levels.
+        // is loaded from CuratedLevelCatalog and contains 255 fixed levels.
         public const int MainJourneyLevelCount = LevelCategoryCatalog.TotalLevelCount;
-        public const int TutorialLevelCount = 3;
         public const int CurrentGenerationVersion = 8;
-
-        public LevelManifestEntry GetMainEntry(int levelNumber)
-        {
-            levelNumber = Math.Max(1, Math.Min(MainJourneyLevelCount, levelNumber));
-            int remaining = levelNumber;
-            foreach (LevelCategory category in LevelCategoryCatalog.All)
-            {
-                int count = LevelCategoryCatalog.Count(category);
-                if (remaining <= count) return GetCategoryEntry(category, remaining);
-                remaining -= count;
-            }
-            return GetCategoryEntry(LevelCategory.Easy, 1);
-        }
-
-        public LevelManifestEntry GetCategoryEntry(LevelCategory category, int levelNumber)
-        {
-            levelNumber = LevelCategoryCatalog.ClampLevel(category, levelNumber);
-            DifficultyTier tier = LevelCategoryCatalog.Difficulty(category, levelNumber);
-            bool cat = LevelCategoryCatalog.IsCatLevel(category, levelNumber);
-            bool maze = category != LevelCategory.Easy && !cat;
-            int width;
-            int height;
-            switch (category)
-            {
-                case LevelCategory.Easy:
-                    width = levelNumber <= 3 ? 4 : 5;
-                    height = width;
-                    break;
-                case LevelCategory.Medium:
-                    width = cat ? 7 + levelNumber % 2 : 9 + levelNumber % 3;
-                    height = cat ? 7 + (levelNumber / 2) % 2 : 9 + (levelNumber / 3) % 3;
-                    break;
-                case LevelCategory.Hard:
-                    width = cat ? 9 : 12 + levelNumber % 4;
-                    height = cat ? 9 : 12 + (levelNumber / 3) % 4;
-                    break;
-                case LevelCategory.Expert:
-                    width = cat ? 10 + levelNumber % 3 : 16 + levelNumber % 5;
-                    height = cat ? 10 + (levelNumber / 3) % 3 : 16 + (levelNumber / 4) % 5;
-                    break;
-                default:
-                    width = tier <= DifficultyTier.Medium ? 7 + levelNumber % 2 : 9 + levelNumber % 3;
-                    height = tier <= DifficultyTier.Medium ? 7 + (levelNumber / 2) % 2 : 9 + (levelNumber / 3) % 3;
-                    break;
-            }
-
-            uint hash = DeterministicRandom.StableHash(category + "_Archetype_" + levelNumber);
-            LevelManifestEntry entry = CreateEntry(
-                levelNumber,
-                string.Format(CultureInfo.InvariantCulture, "DustBot_{0}_{1:000}_v{2}", category, levelNumber, CurrentGenerationVersion),
-                tier,
-                width,
-                height,
-                category == LevelCategory.Easy ? SelectMainArchetype(levelNumber) : SelectChallengeArchetype(hash),
-                false);
-            entry.category = category;
-            entry.useLargeMaze = maze;
-            entry.hasCatBehaviorOverride = true;
-            entry.catBehaviorOverride = cat ? CatBehavior.Curious : CatBehavior.None;
-            entry.useProceduralCatLayout = cat;
-            entry.catPuzzleArchetype = cat ? SelectCatPuzzleArchetype(levelNumber + (int)category * 101) : CatPuzzleArchetype.None;
-            entry.catStartZone = cat ? SelectCatStartZone(levelNumber + (int)category * 101) : -1;
-            entry.mechanicSet = cat ? "CatChaseTurns" : "DrawPath";
-            return entry;
-        }
 
         public LevelManifestEntry GetMasterEntry(int levelNumber)
         {
@@ -179,40 +113,6 @@ namespace DustBot
             };
         }
 
-        private static LevelArchetype SelectMainArchetype(int levelNumber)
-        {
-            if (levelNumber <= TutorialLevelCount)
-            {
-                return LevelArchetype.SimpleRoute;
-            }
-
-            int slot = (levelNumber - TutorialLevelCount - 1) % 6;
-            uint hash = DeterministicRandom.StableHash("Archetype_" + levelNumber);
-            switch (slot)
-            {
-                case 0:
-                    return hash % 2 == 0 ? LevelArchetype.SimpleRoute : LevelArchetype.CrumbOrder;
-                case 1:
-                    return LevelArchetype.BlockerMaze;
-                case 2:
-                    return levelNumber >= 26
-                        ? LevelArchetype.TrickRoute
-                        : LevelArchetype.CrumbOrder;
-                case 3:
-                    return LevelArchetype.Breather;
-                case 4:
-                    return levelNumber >= 26
-                        ? LevelArchetype.DustBunnyDetour
-                        : LevelArchetype.BlockerMaze;
-                default:
-                    return levelNumber >= 20
-                        ? hash % 2 == 0
-                            ? LevelArchetype.HazardAvoidance
-                            : LevelArchetype.TightPath
-                        : LevelArchetype.CrumbOrder;
-            }
-        }
-
         private static LevelArchetype SelectChallengeArchetype(uint hash)
         {
             LevelArchetype[] choices =
@@ -226,29 +126,6 @@ namespace DustBot
                 LevelArchetype.ChallengeRoute
             };
             return choices[(int)(hash % (uint)choices.Length)];
-        }
-
-        private static bool IsLargeMazeArchetype(LevelArchetype archetype)
-        {
-            return archetype == LevelArchetype.BlockerMaze ||
-                   archetype == LevelArchetype.CrumbOrder ||
-                   archetype == LevelArchetype.HazardAvoidance ||
-                   archetype == LevelArchetype.DustBunnyDetour ||
-                   archetype == LevelArchetype.TightPath ||
-                   archetype == LevelArchetype.TrickRoute ||
-                   archetype == LevelArchetype.ChallengeRoute;
-        }
-
-        private static bool ShouldUseCampaignCat(int levelNumber)
-        {
-            if (levelNumber <= 35)
-            {
-                return levelNumber % 3 == 0 || levelNumber % 7 == 0;
-            }
-
-            // Large mazes are selected first. Of the remaining path levels,
-            // this stable cadence keeps cats frequent without creating runs.
-            return levelNumber % 4 != 0;
         }
 
         private static CatPuzzleArchetype SelectCatPuzzleArchetype(int levelNumber)
